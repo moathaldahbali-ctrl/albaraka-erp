@@ -1,0 +1,13 @@
+BEGIN;
+INSERT INTO economic_event_registry (client_transaction_id, event_type) VALUES ('f0000000-0000-0000-0000-00000000000f', 'SALE');
+INSERT INTO sales (id, client_transaction_id, branch_id, warehouse_id, customer_id, register_session_id, occurred_at) 
+VALUES (gen_random_uuid(), 'f0000000-0000-0000-0000-00000000000f', '20000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', '80000000-0000-0000-0000-000000000001', NOW());
+
+DO $$ BEGIN RAISE NOTICE 'BEFORE COMMIT'; END $$;
+COMMIT;
+DO $$ BEGIN RAISE NOTICE 'COMMIT SUCCEEDED'; END $$;
+
+BEGIN;
+DELETE FROM sales WHERE client_transaction_id = 'f0000000-0000-0000-0000-00000000000f';
+DELETE FROM economic_event_registry WHERE client_transaction_id = 'f0000000-0000-0000-0000-00000000000f';
+COMMIT;

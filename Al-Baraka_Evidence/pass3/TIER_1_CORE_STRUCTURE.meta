@@ -1,0 +1,19 @@
+DATE: 2026-09-24
+ARTIFACT: PASS-3 TIER 1 — Core Relational Structure
+SOURCE: Gemini under PASS-3 Directive v1.1
+STATUS: CONFIRMED PASS
+
+SHA-256: 0c72ac702511142c010995bdb72c6899dea69d190b540415fa9be3e69ec305fd
+BYTE SIZE: 15125
+LINE COUNT: 185
+
+KEY FINDINGS:
+- 55 tables with single-UUID PKs
+- exception: economic_event_registry uses client_transaction_id as PK
+- 115 FKs with explicit ON DELETE RESTRICT
+- ON UPDATE: NOT SPECIFIED
+- Input Identity: VALIDATED WITH LIMITATION (SHA unverifiable)
+
+NOTE:
+Re-created after accidental overwrite of first version.
+Authoritative SHA is above.

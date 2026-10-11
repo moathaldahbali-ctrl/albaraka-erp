@@ -1,0 +1,82 @@
+﻿// ignore_for_file: avoid_relative_lib_imports
+import 'dart:io';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path/path.dart' as p;
+import '../lib/data/migrations/v14_permissions.dart';
+import '../lib/data/seed_runner.dart';
+import '../lib/services/permission_service.dart';
+
+/// Helper بديل عن Sqflite.firstIntValue
+int? _firstIntValue(List<Map<String, Object?>> rows) {
+  if (rows.isEmpty) return null;
+  final row = rows.first;
+  if (row.isEmpty) return null;
+  final v = row.values.first;
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v);
+  return null;
+}
+
+Future<void> main() async {
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+
+  final dbPath = r'D:\v94_test\albaraka_local.db';
+  Directory(p.dirname(dbPath)).createSync(recursive: true);
+
+  // لو الملف موجود من قبل، احذفه لإعادة الاختبار
+  final f = File(dbPath);
+  if (await f.exists()) {
+    await f.delete();
+    print('Deleted old test DB');
+  }
+
+  final db = await databaseFactory.openDatabase(
+    dbPath,
+    options: OpenDatabaseOptions(
+      version: 14,
+      onCreate: (db, v) async {
+        await migrateV13ToV14(db);
+      },
+    ),
+  );
+
+  print('DB opened: $dbPath');
+  await SeedRunner(db).run();
+
+  final permRows = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM permissions_local');
+  final roleRows = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM roles_local');
+  final cashierRows = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM role_permissions_local WHERE role_id='Cashier'");
+
+  final permCount = _firstIntValue(permRows);
+  final roleCount = _firstIntValue(roleRows);
+  final cashierCount = _firstIntValue(cashierRows);
+
+  print('--------------------------');
+  print('Permissions: $permCount (expect 196)');
+  print('Roles:       $roleCount (expect 5)');
+  print('Cashier:     $cashierCount (expect 7)');
+  print('--------------------------');
+
+  // Seed user_roles_local: cashier1 → Cashier (لاختبار hasPermission)
+  await db.insert(
+    'user_roles_local',
+    {'user_id': 'cashier1', 'role_id': 'Cashier'},
+    conflictAlgorithm: ConflictAlgorithm.ignore,
+  );
+  print('Seeded: cashier1 -> Cashier');
+  final svc = PermissionService(db);
+  final canCreate = await svc.hasPermission(
+      'cashier1', 'ops.sales_invoice.create');
+  final canDelete = await svc.hasPermission(
+      'cashier1', 'ops.sales_invoice.delete');
+  print('Cashier can create invoice: $canCreate (expect true)');
+  print('Cashier can delete invoice: $canDelete (expect false)');
+
+  await db.close();
+  print('v9.4.2 test complete');
+}

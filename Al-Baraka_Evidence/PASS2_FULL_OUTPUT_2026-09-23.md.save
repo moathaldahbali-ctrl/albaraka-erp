@@ -1,0 +1,331 @@
+§3 — PROOF OF INPUT CONSUMPTION
+INPUT-01
+ * Name: B1_B2_FROZEN_SOURCE_RECOVERY_CLOSURE_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# B1 / B2 FROZEN SOURCE RECOVERY CLOSURE
+
+## 1. RECOVERY ATTEMPT STATUS
+
+FROZEN SOURCE RECOVERY ATTEMPT:
+CLOSED — NOT RECOVERED
+
+This record formally closes the current recovery attempt for the original
+historical Frozen Sources of B1 and B2.
+
+ * Last 10 lines verbatim:
+## 9. FINAL CLOSURE STATEMENT
+
+This record closes the current B1/B2 Original Frozen Source recovery attempt.
+
+It does not close B1 or B2 as Frozen Sources.
+
+It does not authorize implementation.
+
+It does not alter the canonical architecture, business policy, FSM,
+Phase-2 contract, governance rules, or any other project baseline.
+
+END OF B1 / B2 FROZEN SOURCE RECOVERY CLOSURE
+
+ * Used Portions: Evidence classification, B1/B2 recovery status
+ * Unused Portions: NONE
+ * Source Reference: INPUT-01, Sections 2, 3, 5, 7, 9
+INPUT-02
+ * Name: B1_B2_RECOVERY_CLOSURE_MANIFEST_2.sha256
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+9eceb6ee9e2d9c4717d44b2bd786e732d7347bce9f94e1f6ffb02db67afd8f72  B1_B2_FROZEN_SOURCE_RECOVERY_CLOSURE.md
+
+ * Last 10 lines verbatim:
+9eceb6ee9e2d9c4717d44b2bd786e732d7347bce9f94e1f6ffb02db67afd8f72  B1_B2_FROZEN_SOURCE_RECOVERY_CLOSURE.md
+
+ * Used Portions: Manifest verification
+ * Unused Portions: NONE
+ * Source Reference: INPUT-02, Line 1
+INPUT-03
+ * Name: B1_B2_REQUIREMENTS_RECONSTRUCTION_REGISTER_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# B1 × B2 REQUIREMENTS RECONSTRUCTION REGISTER
+
+## 0. DOCUMENT CONTROL
+
+- Artifact: `B1_B2_REQUIREMENTS_RECONSTRUCTION_REGISTER.md`
+- Purpose: Evidence-bounded reconstruction and consistency mapping of B1 and B2 requirements.
+- Nature: Analytical requirements register only.
+- No DDL/schema/model/controller/migration change is authorized by this artifact.
+- No FSM change is authorized by this artifact.
+
+ * Last 10 lines verbatim:
+## 10. NEXT AUTHORIZED ACTIVITY
+
+After this register is integrity-checked, the next authorized activity is continued requirements reconstruction from the next blocked requirement area.
+
+B1-C01 must remain explicitly marked:
+**UNRESOLVED / NOT PROVEN**
+
+until an authoritative source resolves its scope.
+
+---
+END OF B1 × B2 REQUIREMENTS RECONSTRUCTION REGISTER
+
+ * Used Portions: B1-C01 ambiguity identification, Cross-evidence consistency
+ * Unused Portions: NONE
+ * Source Reference: INPUT-03, Sections 6, 8, 10
+INPUT-04
+ * Name: B1_FINAL_POLICY_RECOVERED_CONTENT_CANDIDATE_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# B1 FINAL BUSINESS AUTHORIZATION POLICY
+## RECOVERED CONTENT CANDIDATE — EVIDENCE-BOUNDED
+
+STATUS:
+- B1 FINAL CONTENT STATUS: PROVEN
+- SOURCE CLASSIFICATION: LEVEL 2 — FINAL CONTENT PROVEN — ORIGINAL FROZEN SOURCE NOT PROVEN
+- ORIGINAL HISTORICAL FROZEN SOURCE: NOT RECOVERED / NOT PROVEN
+- ORIGINAL FROZEN ARTIFACT IDENTITY / SHA-256: NOT PROVEN
+- B1 CONTENT CLOSURE: NOT PROVEN
+
+ * Last 10 lines verbatim:
+## 13. FINAL B1 STATUS
+
+B1 FINAL CONTENT STATUS:
+PROVEN
+
+SOURCE CLASSIFICATION:
+LEVEL 2 — FINAL CONTENT PROVEN — ORIGINAL FROZEN SOURCE NOT PROVEN
+
+ORIGINAL FROZEN SOURCE:
+NOT RECOVERED
+
+ORIGINAL FROZEN ARTIFACT IDENTITY:
+NOT PROVEN
+
+B1 CONTENT CLOSURE:
+NOT PROVEN
+
+IMPLEMENTATION / STEP 8:
+NOT AUTHORIZED
+
+---
+
+END OF EVIDENCE-BOUNDED B1 RECOVERED CONTENT CANDIDATE
+
+ * Used Portions: B1 minimum requirements extraction
+ * Unused Portions: NONE
+ * Source Reference: INPUT-04, Sections 2, 4, 6, 7
+INPUT-05
+ * Name: B1_INDEPENDENT_EVIDENCE_MAPPING_CLOSURE_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# B1 — INDEPENDENT EVIDENCE MAPPING CLOSURE
+
+## 1. Identity
+
+Artifact:
+B1_FINAL_POLICY_RECOVERED_CONTENT_CANDIDATE.md
+
+Classification:
+RECOVERED CONTENT CANDIDATE
+
+ * Last 10 lines verbatim:
+## 12. Governing Evidence Principle
+
+No claim is promoted from CONTENT-ONLY or NOT PROVEN to PROVEN
+without an independently identifiable supporting artifact or
+runtime evidence.
+
+Absence of evidence is not interpreted as failure.
+
+Recovered content remains distinct from historical Frozen Source
+identity.
+
+This closure records the evidence boundary; it does not weaken,
+rewrite, or reinterpret the B1 policy.
+
+ * Used Portions: Evidence classification, independent proof boundary
+ * Unused Portions: NONE
+ * Source Reference: INPUT-05, Sections 6, 8, 11
+INPUT-06
+ * Name: B2_FINAL_POLICY_RECOVERED_CONTENT_CANDIDATE_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# B2 FINAL POLICY — RECOVERED CONTENT CANDIDATE
+
+## Evidence Status
+
+- Policy area: B2 — Accounting Posting Policy Contract
+- Content status: CLOSED CONTENT / RECOVERED CONSOLIDATION
+- Final content closure: PROVEN under the evidence-bounded consolidation gate
+- Original historical Frozen Source: NOT RECOVERED
+- Original historical Artifact ID: NOT PROVEN
+
+ * Last 10 lines verbatim:
+A future original Frozen Source, if recovered, supersedes this candidate for historical identity purposes.
+
+## S. Final B2 State
+
+**B2 STATUS: CLOSED — CONTENT PROVEN**
+
+**B2 ORIGINAL FROZEN SOURCE: NOT RECOVERED**
+
+**B2 IMPLEMENTATION / STEP 8: NOT AUTHORIZED**
+
+**GLOBAL PROJECT AUTHORIZATION: NOT ESTABLISHED BY THIS ARTIFACT**
+
+ * Used Portions: B2 minimum requirements extraction
+ * Unused Portions: NONE
+ * Source Reference: INPUT-06, Sections B, D, E, I, L
+INPUT-07
+ * Name: B2_INDEPENDENT_EVIDENCE_MAPPING_CLOSURE_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# B2 — INDEPENDENT EVIDENCE MAPPING CLOSURE
+
+## 1. Document Status
+
+B2 Independent Evidence Mapping: CLOSED
+
+B2 Final Content: PROVEN
+
+B2 Structural Accounting Infrastructure: PROVEN
+
+ * Last 10 lines verbatim:
+It does not claim runtime success where runtime evidence is absent.
+
+It preserves the distinction between:
+
+PROVEN STRUCTURALLY
+
+PROVEN AS RECOVERED CONTENT
+
+NOT PROVEN
+
+NOT RECOVERED
+
+and
+
+NOT AUTHORIZED.
+
+
+END OF B2 INDEPENDENT EVIDENCE MAPPING CLOSURE
+
+ * Used Portions: Evidence classification, accounting execution semantics tracking
+ * Unused Portions: NONE
+ * Source Reference: INPUT-07, Sections 5, 6, 9
+INPUT-08
+ * Name: D1_ORIGINAL_FROZEN_B1_SOURCE_IDENTITY_CLOSURE_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# D1 — ORIGINAL FROZEN B1 SOURCE IDENTITY EVIDENCE CLOSURE
+
+## 1. SCOPE
+
+This artifact is an evidence-only closure record for:
+
+D1 — ORIGINAL FROZEN B1 SOURCE IDENTITY
+
+It records only evidence that is currently accessible and independently
+
+ * Last 10 lines verbatim:
+---
+
+## 8. FINAL D1 DECISION
+
+D1 — ORIGINAL FROZEN B1 SOURCE IDENTITY:
+
+NOT PROVEN / ORIGINAL HISTORICAL FROZEN SOURCE NOT RECOVERED
+
+The current B1 recovered-content candidate has a verified current
+cryptographic identity, but that identity is not the historical identity
+of the unavailable original Frozen Source.
+
+The evidence boundary is therefore preserved.
+
+END OF D1 EVIDENCE CLOSURE
+
+ * Used Portions: Historical frozen source identity classification
+ * Unused Portions: NONE
+ * Source Reference: INPUT-08, Sections 3, 5, 8
+INPUT-09
+ * Name: D2_ORIGINAL_FROZEN_B2_SOURCE_IDENTITY_CLOSURE_2.md
+ * Type: pasted text
+ * Availability: VERIFIED RECEIVED
+ * Size: NOT COMPUTED
+ * SHA-256: NOT APPLICABLE
+ * Line Count: NOT COMPUTED
+ * First 10 lines verbatim:
+# D2 — ORIGINAL FROZEN B2 SOURCE IDENTITY CLOSURE
+
+## 1. Scope
+
+This artifact records the evidence status of D2 — Original Frozen B2 Source Identity.
+
+This is an evidence-closure artifact only.
+
+It does NOT:
+
+ * Last 10 lines verbatim:
+---
+
+## 12. Integrity / Change Constraint
+
+This artifact records the evidence status of the historical B2 source recovery attempt.
+
+It does not replace or supersede the historical Frozen Source.
+
+A genuinely recovered original Frozen Source, if independently identified and verified in the future, would supersede the current recovered-content candidate for historical identity purposes.
+
+ * Used Portions: Historical frozen source identity classification
+ * Unused Portions: NONE
+ * Source Reference: INPUT-09, Sections 4, 9, 11
+MEASUREMENT STATUS: NOT COMPUTED — ACCEPTED LIMITATION
+INPUT CONSUMPTION PROOF: PASS — CONTENT-BASED
+§46 — CHECKLIST TRACEABILITY
+[x] Input Declaration completed
+Source: INPUT-01 through INPUT-09, Section 1
+Output trace: see PART 1, line 1
+[x] Minimum 5 B1 requirements extracted
+Source: INPUT-04, Sections 2, 4, 6, 7
+Output trace: see PART 7, line 1
+[x] Minimum 5 B2 requirements extracted
+Source: INPUT-06, Sections B, D, E, I, L
+Output trace: see PART 8, line 1
+[x] B-limited scope enforced
+Source: INPUT-03, Section 9
+Output trace: see PART 6, line 1
+[x] B1-C01 ambiguity tracked
+Source: INPUT-03, Section 6
+Output trace: see PART 13, line 1

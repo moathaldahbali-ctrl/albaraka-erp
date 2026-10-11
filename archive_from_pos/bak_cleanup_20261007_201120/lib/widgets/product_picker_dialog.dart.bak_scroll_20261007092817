@@ -1,0 +1,215 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+class ProductPickerDialog extends StatefulWidget {
+  final Future<List<Map<String, dynamic>>> Function(String query) search;
+  const ProductPickerDialog({super.key, required this.search});
+
+  @override
+  State<ProductPickerDialog> createState() => _ProductPickerDialogState();
+}
+
+class _ProductPickerDialogState extends State<ProductPickerDialog> {
+  final TextEditingController _ctrl = TextEditingController();
+  final ScrollController _scrollCtrl = ScrollController();
+  List<Map<String, dynamic>> _items = [];
+  bool _loading = true;
+  int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _run('');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(String q) async {
+    setState(() => _loading = true);
+    try {
+      final list = await widget.search(q);
+      if (!mounted) return;
+      setState(() {
+        _items = list;
+        _selectedIndex = 0;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('product search error: $e');
+      if (!mounted) return;
+      setState(() {
+        _items = [];
+        _selectedIndex = 0;
+        _loading = false;
+      });
+    }
+  }
+
+  void _moveSelection(int delta) {
+    if (_items.isEmpty) return;
+    setState(() {
+      _selectedIndex = (_selectedIndex + delta).clamp(0, _items.length - 1);
+    });
+    _scrollToSelected();
+  }
+
+  void _scrollToSelected() {
+    if (!_scrollCtrl.hasClients) return;
+    const double itemHeight = 64.0;
+    final double maxScroll = _scrollCtrl.position.maxScrollExtent;
+    final double target = (_selectedIndex * itemHeight) - 100;
+    final double clamped =
+        target < 0 ? 0 : (target > maxScroll ? maxScroll : target);
+    _scrollCtrl.animateTo(
+      clamped,
+      duration: const Duration(milliseconds: 80),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _confirmSelected() {
+    if (_items.isEmpty) return;
+    Navigator.pop(context, _items[_selectedIndex]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+            _moveSelection(1),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+            _moveSelection(-1),
+        const SingleActivator(LogicalKeyboardKey.numpadEnter):
+            _confirmSelected,
+      },
+      child: Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720, maxHeight: 640),
+          child: Column(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                color: Colors.grey.shade200,
+                child: Row(
+                  children: [
+                    const Icon(Icons.inventory_2),
+                    const SizedBox(width: 8),
+                    const Text(
+                        '\u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0646\u062a\u062c',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    Text('${_items.length}',
+                        style: TextStyle(color: Colors.grey.shade600)),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: TextField(
+                  controller: _ctrl,
+                  autofocus: true,
+                  onChanged: (v) => _run(v),
+                  onSubmitted: (_) => _confirmSelected(),
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    hintText:
+                        '\u0627\u0628\u062d\u062b \u0628\u0627\u0644\u0627\u0633\u0645 \u0623\u0648 \u0627\u0644\u0631\u0645\u0632...',
+                    prefixIcon: Icon(Icons.search),
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _items.isEmpty
+                        ? const Center(
+                            child: Text(
+                                '\u0644\u0627 \u0646\u062a\u0627\u0626\u062c'))
+                        : ListView.separated(
+                            controller: _scrollCtrl,
+                            itemCount: _items.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, i) {
+                              final p = _items[i];
+                              final name =
+                                  (p['name'] as String? ?? '').toString();
+                              final sku =
+                                  (p['sku'] as String? ?? '').toString();
+                              final unit =
+                                  (p['unit_id'] as String? ?? '').toString();
+                              final price =
+                                  (p['sale_price'] as num?)?.toDouble() ?? 0;
+                              final stock =
+                                  (p['stock_qty'] as num?)?.toDouble();
+                              final isSelected = i == _selectedIndex;
+                              return Container(
+                                color: isSelected
+                                    ? Colors.blue.shade50
+                                    : null,
+                                child: ListTile(
+                                  dense: true,
+                                  selected: isSelected,
+                                  leading: CircleAvatar(
+                                    radius: 18,
+                                    child: Text('#$sku',
+                                        style: const TextStyle(fontSize: 9)),
+                                  ),
+                                  title: Text(name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600)),
+                                  subtitle: Row(
+                                    children: [
+                                      if (unit.isNotEmpty)
+                                        Text(unit,
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey.shade700)),
+                                      if (unit.isNotEmpty && stock != null)
+                                        const Text(' \u00b7 '),
+                                      if (stock != null)
+                                        Text(
+                                          '\u0645\u062a\u0627\u062d: ${stock.toStringAsFixed(2)}',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: stock <= 0
+                                                  ? Colors.red
+                                                  : Colors.grey.shade700),
+                                        ),
+                                    ],
+                                  ),
+                                  trailing: Text(
+                                      '${price.toStringAsFixed(0)} YER',
+                                      style: const TextStyle(
+                                          color: Colors.green,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13)),
+                                  onTap: () => Navigator.pop(context, p),
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

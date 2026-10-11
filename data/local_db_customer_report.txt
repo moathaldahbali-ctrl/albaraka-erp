@@ -1,0 +1,47 @@
+=== File: D:\albaraka\albaraka_pos\lib\db\local_db.dart ===
+=== Total lines: 447 ===
+
+### [1] All methods ###
+   21: Future<Database> _open() async {
+   84: Future<void> _createCurrenciesTable(Database db) async {
+   93: Future<void> _createCategoriesTable(Database db) async {
+  101: Future<void> _createProductsTable(Database db) async {
+  112: Future<void> _createProductUnitsTable(Database db) async {
+  124: Future<void> _createSalesTables(Database db) async {
+  149: Future<void> _createDraftsTable(Database db) async {
+  157: Future<void> _createCustomersTable(Database db) async {
+  169: Future<void> upsertCustomers(List<Map<String, dynamic>> customers) async {
+  203: Future<int> countPendingSales() async {
+  209: Future<void> upsertCurrencies(List<Map<String, dynamic>> currencies) async {
+  223: Future<void> upsertCategories(List<Map<String, dynamic>> categories) async {
+  235: Future<void> upsertProducts(List<Map<String, dynamic>> products) async {
+  252: Future<void> upsertProductUnits(List<Map<String, dynamic>> units) async {
+  355: Future<void> saveDraft(String key, Map<String, dynamic> value) async {
+  379: Future<void> clearDraft(String key) async {
+  384: Future<String> _generateInvoiceNumber() async {
+  398: String _newId(String prefix) => _uuid.v4();
+
+### [2] Customer-related methods / fields ###
+   44: await _createCustomersTable(db);
+   53: await db.execute("ALTER TABLE sales_local ADD COLUMN customer_id TEXT");
+   71: await db.execute('ALTER TABLE sales_local ADD COLUMN customer_name TEXT');
+   79: if (oldVersion < 11) { await _createCustomersTable(db); }
+  130: warehouse_id TEXT, customer_id TEXT, register_session_id TEXT,
+  132: payment_method TEXT NOT NULL DEFAULT 'cash', customer_name TEXT,
+  157: Future<void> _createCustomersTable(Database db) async {
+  159: CREATE TABLE IF NOT EXISTS customers_local (
+  169: Future<void> upsertCustomers(List<Map<String, dynamic>> customers) async {
+  173: for (final c in customers) {
+  174: batch.insert('customers_local', {
+  189: Future<List<Map<String, dynamic>>> getCustomers() async {
+  191: return db.query('customers_local', where: 'is_active = 1', orderBy: 'code ASC');
+  194: Future<List<Map<String, dynamic>>> searchCustomers(String query) async {
+  197: return db.query('customers_local',
+  404: String? customerName,
+  422: 'customer_id': '77777777-7777-7777-7777-777777777777',
+  428: 'customer_name': customerName,
+
+### [3] Schema version ###
+   36: version: 11,
+   37: onCreate: (db, version) async {
+   46: onUpgrade: (db, oldVersion, newVersion) async {

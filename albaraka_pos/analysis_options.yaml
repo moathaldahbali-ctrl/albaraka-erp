@@ -1,0 +1,32 @@
+# إعدادات تحليل Flutter/Dart لمشروع البركة
+# آخر تحديث: 2026-10-07
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  # استثناء سكربتات التطوير من التحليل
+  exclude:
+    - tools/**
+    - "**/*.bak_*"
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+
+  errors:
+    # تخفيف التحذيرات غير الحرجة في كود الإنتاج
+    use_build_context_synchronously: warning
+    prefer_interpolation_to_compose_strings: ignore
+    depend_on_referenced_packages: ignore
+
+linter:
+  rules:
+    # تعطيل قواعد غير مهمة لهذا المشروع
+    avoid_print: false
+    prefer_interpolation_to_compose_strings: false
+

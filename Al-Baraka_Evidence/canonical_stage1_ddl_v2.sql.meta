@@ -1,0 +1,48 @@
+ARTIFACT: canonical_stage1_ddl_v2.sql
+PURPOSE: Frozen Stage-1 Schema (Al-Baraka ERP/POS)
+STATUS: GATE-0 = PASS
+
+IDENTITY:
+SHA-256: 61f26fc241975d029f2dbe7a5a8469bdd848ca3e43dd2bc5692f997d1f300ec0
+BYTE SIZE: 25406
+LINE COUNT: 575
+TABLE COUNT: 55 (EXPECTED: 55)
+
+DISCOVERY:
+Found on: 2026-09-23
+File date: 2026-09-18 17:23
+Copies verified:
+- ~/canonical_stage1_ddl_v2.sql
+- ~/storage/downloads/canonical_stage1_ddl_v2.sql
+- WhatsApp Business folder
+All three SHAs match.
+
+STRUCTURE:
+REFERENCES: 115
+CONSTRAINT: 16
+FUNCTIONS: 4
+DEFERRED TRIGGERS: 13 (D1 chain)
+EXTENSIONS: btree_gist
+
+IMPACT:
+GATE-0 = PASS
+DD-1, DD-2, DD-3: OPEN
+FSM/Boundary/FX: MAY PROCEED
+
+BOUNDARIES (UNCHANGED):
+PASS-2: CLOSED
+STEP-8: NOT AUTHORIZED
+Implementation: NOT AUTHORIZED
+B1/B2 Frozen Sources: NOT RECOVERED
+B1-C01: HUMAN-DECISION REQUIRED
+Runtime Proof: NOT PROVEN
+
+TRIGGER BREAKDOWN:
+- Total triggers: 18
+- D1 deferred constraint triggers: 13
+- Other triggers (A5 + others): 5
+
+NOTE ON LINE COUNT:
+- File ends without trailing newline → wc -l shows 575
+- Physical last line: 183 chars, complete (ends with ;)
+- Not truncated.

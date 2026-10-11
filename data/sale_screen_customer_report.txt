@@ -1,0 +1,256 @@
+=== File: D:\albaraka\albaraka_pos\lib\screens\sale_screen.dart ===
+=== Total lines: 1090 ===
+
+### [1] Customer-related lines ###
+   74: final TextEditingController _customerCtrl = TextEditingController();
+   76: final FocusNode _customerFocus = FocusNode();
+  107: _customerCtrl.dispose();
+  109: _customerFocus.dispose();
+  123: _customerCtrl.text.trim().isEmpty &&
+  131: 'customerName': _customerCtrl.text.trim(),
+  210: final cn = draft['customerName'] as String?;
+  211: if (cn != null && cn.isNotEmpty) _customerCtrl.text = cn;
+  353: _customerCtrl.clear();
+  373: customerName: _customerCtrl.text.trim().isEmpty
+  375: : _customerCtrl.text.trim(),
+  460: if (_paymentMethod == 'credit' && _customerCtrl.text.trim().isEmpty) {
+  479: initialCustomerName: _customerCtrl.text.trim().isEmpty
+  481: : _customerCtrl.text.trim(),
+  509: customerName: _customerCtrl.text.trim().isEmpty
+  511: : _customerCtrl.text.trim(),
+  554: _customerCtrl.clear();
+  575: _customerFocus.requestFocus(),
+  680: controller: _customerCtrl,
+  681: focusNode: _customerFocus,
+
+### [2] All TextField / Dropdown / TextFormField ###
+  679: TextField(
+  705: child: TextField(
+  739: return DropdownButtonFormField<String?>(
+  757: const DropdownMenuItem<String?>(value: null, child: Text('الكل')),
+  761: return DropdownMenuItem<String?>(
+  911: child: DropdownButtonFormField<String>(
+  924: return DropdownMenuItem<String>(
+  938: child: TextField(
+
+### [3] Context around customer variables (±4 lines) ###
+---------- Line 74 ----------
+   70: class _SaleScreenState extends State<SaleScreen> {
+   71:   static const String _draftKey = 'invoice_draft';
+   72: 
+   73:   final TextEditingController _searchCtrl = TextEditingController();
+   74:   final TextEditingController _customerCtrl = TextEditingController();
+   75:   final FocusNode _searchFocus = FocusNode();
+   76:   final FocusNode _customerFocus = FocusNode();
+   77:   List<Map<String, dynamic>> _searchResults = [];
+   78:   List<Map<String, dynamic>> _categories = [];
+
+---------- Line 76 ----------
+   72: 
+   73:   final TextEditingController _searchCtrl = TextEditingController();
+   74:   final TextEditingController _customerCtrl = TextEditingController();
+   75:   final FocusNode _searchFocus = FocusNode();
+   76:   final FocusNode _customerFocus = FocusNode();
+   77:   List<Map<String, dynamic>> _searchResults = [];
+   78:   List<Map<String, dynamic>> _categories = [];
+   79:   final List<InvoiceItem> _invoice = [];
+   80:   bool _loadingProducts = true;
+
+---------- Line 107 ----------
+  103:   @override
+  104:   void dispose() {
+  105:     _draftTimer?.cancel();
+  106:     _searchCtrl.dispose();
+  107:     _customerCtrl.dispose();
+  108:     _searchFocus.dispose();
+  109:     _customerFocus.dispose();
+  110:     for (final it in _invoice) {
+  111:       it.dispose();
+
+---------- Line 109 ----------
+  105:     _draftTimer?.cancel();
+  106:     _searchCtrl.dispose();
+  107:     _customerCtrl.dispose();
+  108:     _searchFocus.dispose();
+  109:     _customerFocus.dispose();
+  110:     for (final it in _invoice) {
+  111:       it.dispose();
+  112:     }
+  113:     super.dispose();
+
+---------- Line 123 ----------
+  119:   }
+  120: 
+  121:   Future<void> _saveDraftNow() async {
+  122:     if (_invoice.isEmpty &&
+  123:         _customerCtrl.text.trim().isEmpty &&
+  124:         _paymentMethod == 'cash') {
+  125:       await LocalDatabase.instance.clearDraft(_draftKey);
+  126:       return;
+  127:     }
+
+---------- Line 131 ----------
+  127:     }
+  128:     await LocalDatabase.instance.saveDraft(_draftKey, {
+  129:       'items': _invoice.map((it) => it.toJson()).toList(),
+  130:       'paymentMethod': _paymentMethod,
+  131:       'customerName': _customerCtrl.text.trim(),
+  132:     });
+  133:   }
+  134: 
+  135:   Future<void> _clearDraft() async {
+
+---------- Line 210 ----------
+  206:       _invoice
+  207:         ..clear()
+  208:         ..addAll(newItems);
+  209:       _paymentMethod = (draft['paymentMethod'] as String?) ?? 'cash';
+  210:       final cn = draft['customerName'] as String?;
+  211:       if (cn != null && cn.isNotEmpty) _customerCtrl.text = cn;
+  212:     });
+  213:   }
+  214: 
+
+---------- Line 211 ----------
+  207:         ..clear()
+  208:         ..addAll(newItems);
+  209:       _paymentMethod = (draft['paymentMethod'] as String?) ?? 'cash';
+  210:       final cn = draft['customerName'] as String?;
+  211:       if (cn != null && cn.isNotEmpty) _customerCtrl.text = cn;
+  212:     });
+  213:   }
+  214: 
+  215:   Future<void> _loadCategories() async {
+
+---------- Line 353 ----------
+  349:           it.dispose();
+  350:         }
+  351:         setState(() {
+  352:           _invoice.clear();
+  353:           _customerCtrl.clear();
+  354:         });
+  355:         _scheduleDraftSave();
+  356:       }
+  357:     });
+
+---------- Line 373 ----------
+  369:     return ReceiptData(
+  370:       invoiceNumber: invoiceNumber,
+  371:       occurredAt: DateTime.now(),
+  372:       paymentMethod: _paymentMethod,
+  373:       customerName: _customerCtrl.text.trim().isEmpty
+  374:           ? null
+  375:           : _customerCtrl.text.trim(),
+  376:       paidAmount: paidAmount ?? 0,
+  377:       changeAmount: changeAmount ?? 0,
+
+---------- Line 375 ----------
+  371:       occurredAt: DateTime.now(),
+  372:       paymentMethod: _paymentMethod,
+  373:       customerName: _customerCtrl.text.trim().isEmpty
+  374:           ? null
+  375:           : _customerCtrl.text.trim(),
+  376:       paidAmount: paidAmount ?? 0,
+  377:       changeAmount: changeAmount ?? 0,
+  378:       total: _total,
+  379:       lines: _invoice
+
+---------- Line 460 ----------
+  456:     );
+  457:     if (saveConfirmed != true) return;
+  458:     if (!mounted) return;
+  459: 
+  460:     if (_paymentMethod == 'credit' && _customerCtrl.text.trim().isEmpty) {
+  461:       ScaffoldMessenger.of(context).showSnackBar(
+  462:         const SnackBar(
+  463:           content: Text('اسم العميل مطلوب عند البيع الآجل'),
+  464:           backgroundColor: Colors.orange,
+
+---------- Line 479 ----------
+  475:         context: context,
+  476:         barrierDismissible: false,
+  477:         builder: (_) => PaymentDialog(
+  478:           total: _total,
+  479:           initialCustomerName: _customerCtrl.text.trim().isEmpty
+  480:               ? null
+  481:               : _customerCtrl.text.trim(),
+  482:         ),
+  483:       );
+
+---------- Line 481 ----------
+  477:         builder: (_) => PaymentDialog(
+  478:           total: _total,
+  479:           initialCustomerName: _customerCtrl.text.trim().isEmpty
+  480:               ? null
+  481:               : _customerCtrl.text.trim(),
+  482:         ),
+  483:       );
+  484:       if (paymentResult == null) return;
+  485:       paidAmount = paymentResult.paidAmount;
+
+---------- Line 509 ----------
+  505:       final result = await LocalDatabase.instance.saveInvoice(
+  506:         items: items,
+  507:         total: _total,
+  508:         paymentMethod: _paymentMethod,
+  509:         customerName: _customerCtrl.text.trim().isEmpty
+  510:             ? null
+  511:             : _customerCtrl.text.trim(),
+  512:         paidAmount: paidAmount,
+  513:         changeAmount: changeAmount,
+
+---------- Line 511 ----------
+  507:         total: _total,
+  508:         paymentMethod: _paymentMethod,
+  509:         customerName: _customerCtrl.text.trim().isEmpty
+  510:             ? null
+  511:             : _customerCtrl.text.trim(),
+  512:         paidAmount: paidAmount,
+  513:         changeAmount: changeAmount,
+  514:       );
+  515: 
+
+---------- Line 554 ----------
+  550:       setState(() {
+  551:         _invoice.clear();
+  552:         _searchCtrl.clear();
+  553:         _searchResults = [];
+  554:         _customerCtrl.clear();
+  555:         _saving = false;
+  556:       });
+  557:       await _loadProducts('');
+  558:       _searchFocus.requestFocus();
+
+---------- Line 575 ----------
+  571:       bindings: {
+  572:         const SingleActivator(LogicalKeyboardKey.f10): () => _saveInvoice(),
+  573:         const SingleActivator(LogicalKeyboardKey.f8): _clearInvoice,
+  574:         const SingleActivator(LogicalKeyboardKey.f1): () =>
+  575:             _customerFocus.requestFocus(),
+  576:         const SingleActivator(LogicalKeyboardKey.f3): () =>
+  577:             _searchFocus.requestFocus(),
+  578:         const SingleActivator(LogicalKeyboardKey.f11): () => setState(() =>
+  579:             _paymentMethod = _paymentMethod == 'cash' ? 'credit' : 'cash'),
+
+---------- Line 680 ----------
+  676:             ],
+  677:           ),
+  678:           const SizedBox(height: 8),
+  679:           TextField(
+  680:             controller: _customerCtrl,
+  681:             focusNode: _customerFocus,
+  682:             onChanged: (_) => _scheduleDraftSave(),
+  683:             decoration: InputDecoration(
+  684:               hintText: _paymentMethod == 'credit'
+
+---------- Line 681 ----------
+  677:           ),
+  678:           const SizedBox(height: 8),
+  679:           TextField(
+  680:             controller: _customerCtrl,
+  681:             focusNode: _customerFocus,
+  682:             onChanged: (_) => _scheduleDraftSave(),
+  683:             decoration: InputDecoration(
+  684:               hintText: _paymentMethod == 'credit'
+  685:                   ? 'اسم العميل (مطلوب للآجل)'
+

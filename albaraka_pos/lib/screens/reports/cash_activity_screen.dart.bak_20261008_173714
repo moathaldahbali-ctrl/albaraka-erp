@@ -1,0 +1,279 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart' hide TextDirection;
+import '../../db/local_db.dart';
+
+/// v8.3.5 — تقرير حركة الصناديق (الورديات)
+class CashActivityScreen extends StatefulWidget {
+  const CashActivityScreen({super.key});
+
+  @override
+  State<CashActivityScreen> createState() => _CashActivityScreenState();
+}
+
+enum _Period { today, week, month }
+
+class _CashActivityScreenState extends State<CashActivityScreen> {
+  _Period _period = _Period.today;
+  List<Map<String, dynamic>> _rows = [];
+  bool _loading = true;
+  double _sumDiff = 0;
+  int _countOpen = 0;
+  int _countClosed = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+
+    String where = '';
+    final now = DateTime.now();
+    if (_period == _Period.today) {
+      final start = DateTime(now.year, now.month, now.day).toIso8601String();
+      where = "AND opened_at >= '$start'";
+    } else if (_period == _Period.week) {
+      final start = now.subtract(const Duration(days: 7)).toIso8601String();
+      where = "AND opened_at >= '$start'";
+    } else {
+      final start = now.subtract(const Duration(days: 30)).toIso8601String();
+      where = "AND opened_at >= '$start'";
+    }
+
+    final db = await LocalDatabase.instance.database;
+    final rows = await db.rawQuery('''
+      SELECT s.id, s.opened_at, s.closed_at, s.opening_cash,
+             s.closing_cash, s.status, s.notes,
+             u.display_name AS cashier_name,
+             (SELECT COALESCE(SUM(total), 0) FROM sales_local
+              WHERE register_session_id = s.id AND payment_method = 'cash') AS sales_cash,
+             (SELECT COUNT(*) FROM sales_local WHERE register_session_id = s.id) AS sales_count
+      FROM register_sessions_local s
+      LEFT JOIN users_local u ON u.id = s.user_id
+      WHERE 1=1 $where
+      ORDER BY s.opened_at DESC
+      LIMIT 200
+    ''');
+
+    double sumDiff = 0;
+    int cOpen = 0, cClosed = 0;
+    for (final r in rows) {
+      final status = (r['status'] as String?) ?? 'open';
+      if (status == 'open') {
+        cOpen++;
+      } else {
+        cClosed++;
+        final openCash = (r['opening_cash'] as num?)?.toDouble() ?? 0;
+        final salesCash = (r['sales_cash'] as num?)?.toDouble() ?? 0;
+        final closingCash = (r['closing_cash'] as num?)?.toDouble() ?? 0;
+        final expected = openCash + salesCash;
+        sumDiff += (closingCash - expected);
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _rows = rows;
+      _sumDiff = sumDiff;
+      _countOpen = cOpen;
+      _countClosed = cClosed;
+      _loading = false;
+    });
+  }
+
+  String _fmtNum(num n) => NumberFormat('#,##0.##').format(n);
+
+  String _fmtDateTime(String? iso) {
+    if (iso == null) return '-';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return '-';
+    return DateFormat('MM/dd HH:mm').format(d);
+  }
+
+  String _shortId(String? id) {
+    if (id == null || id.length < 8) return id ?? '-';
+    return id.substring(0, 8);
+  }
+
+  double _expected(Map<String, dynamic> r) {
+    final openCash = (r['opening_cash'] as num?)?.toDouble() ?? 0;
+    final salesCash = (r['sales_cash'] as num?)?.toDouble() ?? 0;
+    return openCash + salesCash;
+  }
+
+  double _diff(Map<String, dynamic> r) {
+    if ((r['status'] as String?) == 'open') return 0;
+    final closing = (r['closing_cash'] as num?)?.toDouble() ?? 0;
+    return closing - _expected(r);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('حركة الصناديق'),
+          actions: [
+            IconButton(icon: const Icon(Icons.refresh), onPressed: _load, tooltip: 'تحديث'),
+          ],
+        ),
+        body: Column(
+          children: [
+            _buildFilter(theme),
+            _buildSummary(theme),
+            const Divider(height: 1),
+            Expanded(child: _buildTable(theme)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilter(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          const Text('الفترة:', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          SegmentedButton<_Period>(
+            segments: const [
+              ButtonSegment(value: _Period.today, label: Text('اليوم')),
+              ButtonSegment(value: _Period.week, label: Text('7 أيام')),
+              ButtonSegment(value: _Period.month, label: Text('30 يوم')),
+            ],
+            selected: {_period},
+            onSelectionChanged: (s) {
+              setState(() => _period = s.first);
+              _load();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummary(ThemeData theme) {
+    final diffColor = _sumDiff.abs() < 1
+        ? Colors.green
+        : (_sumDiff > 0 ? Colors.blue : Colors.red);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          _statCard(theme, 'ورديات مفتوحة', '$_countOpen', '', Colors.orange),
+          const SizedBox(width: 8),
+          _statCard(theme, 'ورديات مغلقة', '$_countClosed', '', Colors.green),
+          const SizedBox(width: 8),
+          _statCard(theme, 'إجمالي الفرق', '', _fmtNum(_sumDiff), diffColor),
+        ],
+      ),
+    );
+  }
+
+  Widget _statCard(ThemeData theme, String title, String count, String amount, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            if (count.isNotEmpty)
+              Text(count, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            if (amount.isNotEmpty)
+              Text('$amount YER', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTable(ThemeData theme) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_rows.isEmpty) return const Center(child: Text('لا توجد ورديات في هذه الفترة'));
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: DataTable(
+          headingRowHeight: 40,
+          dataRowMinHeight: 36,
+          dataRowMaxHeight: 40,
+          columns: const [
+            DataColumn(label: Text('الوردية')),
+            DataColumn(label: Text('الكاشير')),
+            DataColumn(label: Text('فتح')),
+            DataColumn(label: Text('إغلاق')),
+            DataColumn(label: Text('نقد فتح')),
+            DataColumn(label: Text('متوقع')),
+            DataColumn(label: Text('فعلي')),
+            DataColumn(label: Text('الفرق')),
+            DataColumn(label: Text('الحالة')),
+          ],
+          rows: _rows.map((r) {
+            final isOpen = (r['status'] as String?) == 'open';
+            final expected = _expected(r);
+            final closing = (r['closing_cash'] as num?)?.toDouble();
+            final diff = _diff(r);
+            final diffColor = diff.abs() < 1
+                ? Colors.green
+                : (diff > 0 ? Colors.blue : Colors.red);
+
+            return DataRow(cells: [
+              DataCell(Text(_shortId(r['id'] as String?),
+                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace'))),
+              DataCell(Text((r['cashier_name'] as String?) ?? '-',
+                  style: const TextStyle(fontSize: 12))),
+              DataCell(Text(_fmtDateTime(r['opened_at'] as String?),
+                  style: const TextStyle(fontSize: 11))),
+              DataCell(Text(_fmtDateTime(r['closed_at'] as String?),
+                  style: const TextStyle(fontSize: 11))),
+              DataCell(Text(_fmtNum((r['opening_cash'] as num?) ?? 0),
+                  style: const TextStyle(fontSize: 12))),
+              DataCell(Text(_fmtNum(expected),
+                  style: const TextStyle(fontSize: 12))),
+              DataCell(Text(
+                isOpen ? '-' : _fmtNum(closing ?? 0),
+                style: const TextStyle(fontSize: 12),
+              )),
+              DataCell(Text(
+                isOpen ? '-' : _fmtNum(diff),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isOpen ? Colors.grey : diffColor,
+                ),
+              )),
+              DataCell(Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: (isOpen ? Colors.orange : Colors.green).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  isOpen ? 'مفتوحة' : 'مغلقة',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isOpen ? Colors.orange : Colors.green,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              )),
+            ]);
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}

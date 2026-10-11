@@ -1,0 +1,16 @@
+﻿
+File                                              Line Match   Content                                                 
+----                                              ---- -----   -------                                                 
+lib\data\migrations\v14_permissions.dart             5 BetaSys /// المرجع: صلاحيات BetaSys الكاملة (6 أقسام، 206 صلا...
+lib\data\seeds\permissions_seed.dart                 1 BetaSys /// صلاحيات BetaSys الكاملة (206 صلاحية)                
+lib\data\seeds\permissions_seed.dart               253 BetaSys // المصدر: تبويب "صلاحيات المنح-الإلغاء" من BetaSys     
+lib\data\seeds\permissions_seed.dart               418 BetaSys {'key': 'help.run',                              'nam...
+lib\screens\reports\stock_balance_screen.dart        5 BetaSys /// v8.3.7a — شاشة بيانات الأصناف (BetaSys style)       
+lib\screens\settings\customers_manage_screen.dart    7 BetaSys /// v9.3 — بيانات العملاء الكاملة (BetaSys style) + ف...
+lib\theme\app_colors.dart                            2 BetaSys // لوحة ألوان البركة — مستخرجة من تصميم Betasys         
+lib\theme\app_colors.dart                            8 BetaSys /// المرجع: تصميم Betasys Mini (2026-10-07)             
+lib\theme\app_colors.dart                           12 BetaSys // ─── الأساسية (من Betasys) ───                        
+lib\theme\app_colors.dart                           50 BetaSys /// خلفية الصف المحدد في البحث (Betasys)                
+lib\main.dart                                      254 BetaSys // HomePage — v8.1/6 (Betasys-style)                    
+
+

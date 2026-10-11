@@ -1,0 +1,5 @@
+BEGIN;
+INSERT INTO economic_event_registry (client_transaction_id, event_type) VALUES ('c0000000-0000-0000-0000-00000000000c', 'SALE');
+DO $$ BEGIN RAISE NOTICE 'BEFORE COMMIT'; END $$;
+COMMIT;
+DO $$ BEGIN RAISE NOTICE 'COMMIT SUCCEEDED'; END $$;

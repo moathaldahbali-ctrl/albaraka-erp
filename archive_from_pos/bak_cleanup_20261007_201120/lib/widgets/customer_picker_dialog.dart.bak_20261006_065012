@@ -1,0 +1,115 @@
+import 'package:flutter/material.dart';
+
+class CustomerPickerDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> customers;
+  const CustomerPickerDialog({super.key, required this.customers});
+
+  @override
+  State<CustomerPickerDialog> createState() => _CustomerPickerDialogState();
+}
+
+class _CustomerPickerDialogState extends State<CustomerPickerDialog> {
+  final TextEditingController _ctrl = TextEditingController();
+  late List<Map<String, dynamic>> _filtered;
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = widget.customers;
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _filter(String q) {
+    final s = q.trim();
+    setState(() {
+      if (s.isEmpty) {
+        _filtered = widget.customers;
+      } else {
+        _filtered = widget.customers.where((c) {
+          final name = (c['name'] as String? ?? '').toString();
+          final phone = (c['phone'] as String? ?? '').toString();
+          final code = (c['code'] as String? ?? '').toString();
+          return name.contains(s) || phone.contains(s) || code.contains(s);
+        }).toList();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 620),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: Colors.grey.shade200,
+              child: Row(
+                children: [
+                  const Icon(Icons.people),
+                  const SizedBox(width: 8),
+                  const Text('\u0627\u062e\u062a\u064a\u0627\u0631 \u0639\u0645\u064a\u0644',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  Text('${_filtered.length}',
+                      style: TextStyle(color: Colors.grey.shade600)),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                controller: _ctrl,
+                autofocus: true,
+                onChanged: _filter,
+                decoration: const InputDecoration(
+                  hintText: '\u0627\u0628\u062d\u062b \u0628\u0627\u0644\u0627\u0633\u0645 \u0623\u0648 \u0627\u0644\u0647\u0627\u062a\u0641 \u0623\u0648 \u0627\u0644\u0643\u0648\u062f...',
+                  prefixIcon: Icon(Icons.search),
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: _filtered.isEmpty
+                  ? const Center(child: Text('\u0644\u0627 \u0646\u062a\u0627\u0626\u062c'))
+                  : ListView.separated(
+                      itemCount: _filtered.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, i) {
+                        final c = _filtered[i];
+                        final name = (c['name'] as String? ?? '').toString();
+                        final phone = (c['phone'] as String? ?? '').toString();
+                        final code = (c['code'] as String? ?? '').toString();
+                        return ListTile(
+                          dense: true,
+                          leading: CircleAvatar(
+                            radius: 16,
+                            child: Text('#$code',
+                                style: const TextStyle(fontSize: 10)),
+                          ),
+                          title: Text(name),
+                          subtitle: phone.isNotEmpty ? Text(phone) : null,
+                          onTap: () => Navigator.pop(context, c),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
