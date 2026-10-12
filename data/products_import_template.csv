@@ -1,0 +1,6 @@
+sku,name,unit,standard_cost,sale_price,category,category_slug
+TEST-001,أرز بسمتي 5 كجم,كيس,3500,4420,الرز والمكرونة,rice_pasta
+TEST-002,ماء معدني 600 مل,قطعة,80,120,المياه المعدنية,mineral_water
+TEST-003,تونة معلبة 200 جم,علبة,900,1200,المعلبات,canned
+TEST-004,منتج بتصنيف خاطئ,قطعة,100,150,تصنيف وهمي,invalid_slug_xyz
+TEST-005,منتج بسعر بيع أقل من التكلفة,قطعة,500,300,البسكويت,biscuits

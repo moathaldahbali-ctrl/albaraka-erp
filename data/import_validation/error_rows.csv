@@ -1,0 +1,3 @@
+sku,name,unit,standard_cost,sale_price,category,category_slug,reason
+TEST-004,منتج بتصنيف خاطئ,قطعة,100,150,تصنيف وهمي,invalid_slug_xyz,unknown_category_slug
+TEST-005,منتج بسعر بيع أقل من التكلفة,قطعة,500,300,البسكويت,biscuits,price_not_above_cost
