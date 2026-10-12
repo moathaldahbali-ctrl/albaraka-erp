@@ -1,0 +1,265 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../db/local_db.dart';
+
+class LoginScreen extends StatefulWidget {
+  final VoidCallback onLoginSuccess;
+  const LoginScreen({super.key, required this.onLoginSuccess});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  List<Map<String, dynamic>> _users = [];
+  String? _selectedUserId;
+  final _pinController = TextEditingController();
+  final _pinFocus = FocusNode();
+  bool _loading = true;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    _pinFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadUsers() async {
+    final db = await LocalDatabase.instance.database;
+    final rows = await db.query(
+      'users_local',
+      where: 'is_active = 1',
+      orderBy: 'username',
+    );
+    if (!mounted) return;
+    setState(() {
+      _users = rows;
+      if (_selectedUserId == null && _users.isNotEmpty) {
+        _selectedUserId = _users.first['id'] as String?;
+      }
+      _loading = false;
+    });
+  }
+
+  bool _isLocked() {
+    if (_selectedUserId == null) return false;
+    final user = _users.firstWhere(
+      (u) => u['id'] == _selectedUserId,
+      orElse: () => <String, dynamic>{},
+    );
+    final lockedUntil = user['locked_until'] as String?;
+    if (lockedUntil == null || lockedUntil.isEmpty) return false;
+    final lockTime = DateTime.tryParse(lockedUntil);
+    return lockTime != null && lockTime.isAfter(DateTime.now());
+  }
+
+  String _hashPin(String salt, String pin) {
+    final bytes = utf8.encode(salt + pin);
+    return sha256.convert(bytes).toString();
+  }
+
+  Future<void> _attemptLogin() async {
+    if (_selectedUserId == null) return;
+
+    final pin = _pinController.text.trim();
+    if (pin.length != 4) {
+      setState(() => _error = 'أدخل 4 أرقام');
+      return;
+    }
+
+    final user = _users.firstWhere(
+      (u) => u['id'] == _selectedUserId,
+      orElse: () => <String, dynamic>{},
+    );
+    if (user.isEmpty) return;
+
+    final lockedUntil = user['locked_until'] as String?;
+    if (lockedUntil != null && lockedUntil.isNotEmpty) {
+      final lockTime = DateTime.tryParse(lockedUntil);
+      if (lockTime != null && lockTime.isAfter(DateTime.now())) {
+        final mins = lockTime.difference(DateTime.now()).inMinutes + 1;
+        setState(() => _error = 'مقفل. حاول بعد $mins دقيقة');
+        return;
+      } else {
+        // القفل انتهى — صفّر العدّاد تلقائياً
+        await LocalDatabase.instance.resetFailedAttempts(user['id'] as String);
+        await _loadUsers();
+      }
+    }
+
+    setState(() { _submitting = true; _error = null; });
+
+    final salt = user['pin_salt'] as String? ?? '';
+    final expectedHash = user['pin_hash'] as String? ?? '';
+    final computedHash = _hashPin(salt, pin);
+
+    if (computedHash == expectedHash) {
+      await LocalDatabase.instance.resetFailedAttempts(user['id'] as String);
+      final db = await LocalDatabase.instance.database;
+      await db.rawInsert(
+        'INSERT OR REPLACE INTO drafts_local (key, value, updated_at) VALUES (?, ?, ?)',
+        [
+          'current_user_id',
+          user['id'],
+          DateTime.now().toIso8601String(),
+        ],
+      );
+      if (!mounted) return;
+      widget.onLoginSuccess();
+    } else {
+      final failed = ((user['failed_attempts'] as int?) ?? 0) + 1;
+      String? lockUntil;
+      if (failed >= 5) {
+        lockUntil = DateTime.now()
+            .add(const Duration(minutes: 5))
+            .toIso8601String();
+      }
+      await LocalDatabase.instance
+          .recordFailedAttempt(user['id'] as String, failed, lockUntil);
+      await _loadUsers();
+      if (!mounted) return;
+      setState(() {
+        _error = failed >= 5
+            ? '5 محاولات فاشلة. مقفل 5 دقائق.'
+            : 'PIN خطأ ($failed/5)';
+        _submitting = false;
+        _pinController.clear();
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isLocked()) {
+          _pinFocus.requestFocus();
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset('assets/logo_color.png', height: 110),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'بقالة وبهارات البركة',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const Text(
+                    'صنعاء',
+                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 32),
+                  if (_loading)
+                    const CircularProgressIndicator()
+                  else if (_users.isEmpty)
+                    const Text('لا يوجد مستخدمون. اتصل بالمدير.')
+                  else ...[
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedUserId,
+                      decoration: const InputDecoration(
+                        labelText: 'المستخدم',
+                        prefixIcon: Icon(Icons.person),
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _users.map((u) {
+                        return DropdownMenuItem<String>(
+                          value: u['id'] as String,
+                          child: Text(
+                            (u['display_name'] ?? u['username']).toString(),
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: _submitting
+                          ? null
+                          : (v) => setState(() {
+                                _selectedUserId = v;
+                                _error = null;
+                              }),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _pinController,
+                      focusNode: _pinFocus,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(4),
+                      ],
+                      obscureText: true,
+                      enabled: !_submitting && !_isLocked(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 24, letterSpacing: 12),
+                      decoration: const InputDecoration(
+                        labelText: 'الرقم السري (PIN)',
+                        prefixIcon: Icon(Icons.lock),
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (_) => _attemptLogin(),
+                    ),
+                    const SizedBox(height: 20),
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(
+                              color: Colors.red, fontSize: 14),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        onPressed: (_submitting || _isLocked()) ? null : _attemptLogin,
+                        icon: _submitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.login),
+                        label: Text(
+                          _submitting ? 'جاري الدخول...' : 'دخول',
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange.shade700,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  const Text(
+                    'v9.4.6 • 2026-10-10',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

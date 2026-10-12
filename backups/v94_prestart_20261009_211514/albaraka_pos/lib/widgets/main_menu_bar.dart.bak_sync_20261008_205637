@@ -1,0 +1,147 @@
+import 'package:flutter/material.dart';
+
+/// شريط القوائم العلوي — v8.3
+class MainMenuBar extends StatelessWidget {
+  final VoidCallback onNewSale;
+  final VoidCallback onSync;
+  final VoidCallback onCloseSession;
+  final VoidCallback onLogout;
+  final VoidCallback onOpenThemes;
+  final VoidCallback? onOpenAbout;
+  final VoidCallback? onOpenProductsManage;
+  final VoidCallback? onOpenCustomersManage;
+  final VoidCallback? onOpenPosReport;
+  final VoidCallback? onOpenCashReport;
+  final VoidCallback? onOpenCustomerReport;
+  final VoidCallback? onOpenProductCard;
+  final VoidCallback? onOpenStockBalance;
+  final VoidCallback? onOpenExpired;
+  final VoidCallback? onOpenAlerts;
+
+  const MainMenuBar({
+    super.key,
+    required this.onNewSale,
+    required this.onSync,
+    required this.onCloseSession,
+    required this.onLogout,
+    required this.onOpenThemes,
+    this.onOpenAbout,
+    this.onOpenProductsManage,
+    this.onOpenCustomersManage,
+    this.onOpenPosReport,
+    this.onOpenCashReport,
+    this.onOpenCustomerReport,
+    this.onOpenProductCard,
+    this.onOpenStockBalance,
+    this.onOpenExpired,
+    this.onOpenAlerts,
+  });
+
+  Widget _item(String label, IconData icon, VoidCallback? onPressed) {
+    final enabled = onPressed != null;
+    return MenuItemButton(
+      onPressed: onPressed,
+      leadingIcon: Icon(icon, size: 18, color: enabled ? null : Colors.grey),
+      trailingIcon: enabled
+          ? null
+          : const Icon(Icons.lock, size: 13, color: Colors.grey),
+      child: Text(
+        label,
+        style: TextStyle(color: enabled ? null : Colors.grey),
+      ),
+    );
+  }
+
+  Widget _menu(String label, List<Widget> children) {
+    return SubmenuButton(
+      menuChildren: children,
+      child: Text(label),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      height: 52,
+      color: theme.colorScheme.surface,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          Image.asset(
+            'assets/logo_color.png',
+            width: 26,
+            height: 26,
+            errorBuilder: (_, __, ___) =>
+                const Icon(Icons.store, size: 22),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'البركة',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          MenuBar(
+            children: [
+              _menu('ملف', [
+                _item('فاتورة جديدة', Icons.receipt_long, onNewSale),
+                const Divider(height: 1),
+                _item('تحديث البيانات', Icons.refresh, onSync),
+                _item('تغيير كلمة المرور', Icons.password, null),
+                _item('فحص النظام', Icons.health_and_safety, null),
+                _item('ضغط قاعدة المعطيات', Icons.compress, null),
+                const Divider(height: 1),
+                _item('خروج', Icons.logout, onLogout),
+              ]),
+              _menu('العمليات', [
+                _item('فاتورة مبيعات', Icons.point_of_sale, onNewSale),
+                _item('مرتجع مبيعات', Icons.assignment_return, null),
+                _item('عرض سعر', Icons.request_quote, null),
+                const Divider(height: 1),
+                _item('سند قبض', Icons.receipt, null),
+                _item('سند صرف', Icons.payments, null),
+                const Divider(height: 1),
+                _item('طلب شراء', Icons.shopping_cart, null),
+                _item('محضر جرد مخزني', Icons.fact_check, null),
+              ]),
+              _menu('التقارير', [
+                _item('حركة نقاط البيع', Icons.point_of_sale, onOpenPosReport),
+                _item('حركة الصناديق', Icons.account_balance_wallet,
+                    onOpenCashReport),
+                _item('حركة العملاء', Icons.people, onOpenCustomerReport),
+                const Divider(height: 1),
+                _item('بطاقة الصنف', Icons.badge, onOpenProductCard),
+                _item('رصيد الأصناف', Icons.assignment, onOpenStockBalance),
+                _item('الأصناف المنتهية', Icons.warning_amber, onOpenExpired),
+                const Divider(height: 1),
+                _item('التنبيهات', Icons.notifications, onOpenAlerts),
+              ]),
+              _menu('الإعدادات', [
+                _item('الثيمات والألوان', Icons.palette, onOpenThemes),
+                _item('بيانات الأصناف', Icons.category, onOpenProductsManage),
+                _item('بيانات العملاء', Icons.people_alt, onOpenCustomersManage),
+                const Divider(height: 1),
+                _item('عن النظام', Icons.info_outline, onOpenAbout),
+              ]),
+            ],
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.lock_outline),
+            tooltip: 'إغلاق الوردية',
+            onPressed: onCloseSession,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'تسجيل الخروج',
+            onPressed: onLogout,
+          ),
+        ],
+      ),
+    );
+  }
+}

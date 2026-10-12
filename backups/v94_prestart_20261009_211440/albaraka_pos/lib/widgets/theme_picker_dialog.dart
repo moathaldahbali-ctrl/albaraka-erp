@@ -1,0 +1,285 @@
+// lib/widgets/theme_picker_dialog.dart
+// Theme picker - 6 presets + custom color + light/dark mode
+
+import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import '../theme/theme_presets.dart';
+import '../theme/theme_provider.dart';
+
+class ThemePickerDialog extends StatefulWidget {
+  const ThemePickerDialog({super.key});
+
+  static Future<void> show(BuildContext context) {
+    return showDialog<void>(
+      context: context,
+      builder: (_) => const ThemePickerDialog(),
+    );
+  }
+
+  @override
+  State<ThemePickerDialog> createState() => _ThemePickerDialogState();
+}
+
+class _ThemePickerDialogState extends State<ThemePickerDialog> {
+  late String _selectedId;
+  late ThemeMode _selectedMode;
+  late Color? _customColor;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = ThemeProvider.instance;
+    _selectedId = p.themeId.value;
+    _selectedMode = p.themeMode.value;
+    _customColor = p.customColor.value;
+  }
+
+  Future<void> _pickCustomColor() async {
+    Color temp = _customColor ?? Theme.of(context).colorScheme.primary;
+    final picked = await showDialog<Color>(
+      context: context,
+      builder: (ctx) {
+        Color current = temp;
+        return AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.colorize),
+              SizedBox(width: 8),
+              Text('اختر لونك المفضل'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ColorPicker(
+                  pickerColor: temp,
+                  onColorChanged: (c) => current = c,
+                  enableAlpha: false,
+                  labelTypes: const [],
+                  pickerAreaHeightPercent: 0.6,
+                  displayThumbColor: true,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '#${current.toARGB32().toRadixString(16).substring(2, 8).toUpperCase()}',
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, current),
+              child: const Text('موافق'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _customColor = picked;
+        _selectedId = 'custom';
+      });
+    }
+  }
+
+  Future<void> _apply() async {
+    debugPrint('[Picker] _apply START - id=$_selectedId mode=$_selectedMode color=$_customColor');
+    final p = ThemeProvider.instance;
+    try {
+      if (_customColor != null && _selectedId == 'custom') {
+        debugPrint('[Picker] setting custom color');
+        await p.setCustomColor(_customColor);
+      } else {
+        debugPrint('[Picker] setting preset id=$_selectedId');
+        await p.setCustomColor(null);
+        await p.setTheme(_selectedId);
+      }
+      debugPrint('[Picker] setting mode=$_selectedMode');
+      await p.setMode(_selectedMode);
+      debugPrint('[Picker] themeId now=${p.themeId.value}');
+      debugPrint('[Picker] DONE');
+    } catch (e, st) {
+      debugPrint('[Picker] ERROR: $e');
+      debugPrint('[Picker] STACK: $st');
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.palette, color: cs.primary),
+          const SizedBox(width: 8),
+          const Text('اختر ثيم الواجهة'),
+        ],
+      ),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ─── Presets ───
+              const Text('النمط:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: kThemePresets.map(_buildPresetChip).toList(),
+              ),
+              const SizedBox(height: 16),
+
+              // ─── Custom color ───
+              const Text('أو لون مخصص:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  // معاينة اللون المخصص
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: _customColor ?? Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _selectedId == 'custom'
+                            ? cs.primary
+                            : Colors.grey.shade400,
+                        width: _selectedId == 'custom' ? 3 : 1,
+                      ),
+                    ),
+                    child: _customColor == null
+                        ? const Icon(Icons.colorize, size: 24)
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickCustomColor,
+                      icon: const Icon(Icons.colorize),
+                      label: Text(
+                        _customColor == null
+                            ? 'اختر لوناً'
+                            : 'تغيير اللون (${_customColor!.toARGB32().toRadixString(16).substring(2, 8).toUpperCase()})',
+                      ),
+                    ),
+                  ),
+                  if (_customColor != null) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'مسح اللون المخصص',
+                      icon: const Icon(Icons.clear),
+                      onPressed: () => setState(() {
+                        _customColor = null;
+                        _selectedId = kThemePresets.first.id;
+                      }),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // ─── Mode ───
+              const Text('الوضع:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 8),
+              SegmentedButton<ThemeMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: ThemeMode.light,
+                    icon: Icon(Icons.light_mode),
+                    label: Text('نهاري'),
+                  ),
+                  ButtonSegment(
+                    value: ThemeMode.dark,
+                    icon: Icon(Icons.dark_mode),
+                    label: Text('ليلي'),
+                  ),
+                  ButtonSegment(
+                    value: ThemeMode.system,
+                    icon: Icon(Icons.settings_suggest),
+                    label: Text('النظام'),
+                  ),
+                ],
+                selected: {_selectedMode},
+                onSelectionChanged: (s) =>
+                    setState(() => _selectedMode = s.first),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('إلغاء'),
+        ),
+        ElevatedButton.icon(
+          onPressed: _apply,
+          icon: const Icon(Icons.check),
+          label: const Text('تطبيق'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPresetChip(ThemePreset p) {
+    final isSelected = p.id == _selectedId;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = p.primaryFor(isDark ? Brightness.dark : Brightness.light);
+
+    return InkWell(
+      onTap: () => setState(() {
+        _selectedId = p.id;
+        _customColor = null;
+      }),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 110,
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withAlpha(isSelected ? 60 : 20),
+          border: Border.all(
+            color: isSelected ? color : Colors.grey.shade400,
+            width: isSelected ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: [
+            Text(p.emoji, style: const TextStyle(fontSize: 22)),
+            const SizedBox(height: 4),
+            Text(
+              p.nameAr,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, size: 16, color: color),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,300 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../db/local_db.dart';
+import '../services/receipt_service.dart';
+import 'package:intl/intl.dart';
+
+class CloseSessionDialog extends StatefulWidget {
+  const CloseSessionDialog({super.key});
+
+  @override
+  State<CloseSessionDialog> createState() => _CloseSessionDialogState();
+}
+
+class _CloseSessionDialogState extends State<CloseSessionDialog> {
+  final _cashCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  final _cashFocus = FocusNode();
+
+  bool _loading = true;
+  bool _closing = false;
+  Map<String, dynamic>? _summary;
+  String? _error;
+  String? _cashierName;
+
+  double get _closingCash {
+    final t = _cashCtrl.text.trim();
+    if (t.isEmpty) return 0;
+    return double.tryParse(t) ?? 0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSummary();
+  }
+
+  Future<void> _loadSummary() async {
+    try {
+      final session = await LocalDatabase.instance.getActiveSession();
+      if (session == null) {
+        setState(() {
+          _error = 'لا توجد وردية مفتوحة';
+          _loading = false;
+        });
+        return;
+      }
+      final summary = await LocalDatabase.instance
+          .getSessionSummary(session['id'] as String);
+      final cashierName =
+          await LocalDatabase.instance.getCurrentUserName();
+      if (!mounted) return;
+      setState(() {
+        _summary = summary;
+        _cashierName = cashierName;
+        _loading = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _cashFocus.requestFocus();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'فشل تحميل الملخص: $e';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _cashCtrl.dispose();
+    _notesCtrl.dispose();
+    _cashFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirmClose() async {
+    if (_closing) return;
+    setState(() => _closing = true);
+    try {
+      final session = _summary!['session'] as Map<String, dynamic>;
+      await LocalDatabase.instance.closeSession(
+        sessionId: session['id'] as String,
+        closingCash: _closingCash,
+        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+      );      // v7.5: generate shift report PDF
+      try {
+        final reportSummary = await LocalDatabase.instance
+            .getSessionSummary(session['id'] as String);
+        final invoices = await LocalDatabase.instance
+            .getSessionInvoices(session['id'] as String);
+        final cashierName =
+            await LocalDatabase.instance.getCurrentUserName() ?? '\u063a\u064a\u0631 \u0645\u0639\u0631\u0648\u0641';
+        final sessionRow =
+            reportSummary['session'] as Map<String, dynamic>;
+
+        final sessionData = SessionData(
+          cashierName: cashierName,
+          openedAt: DateTime.parse(sessionRow['opened_at'] as String),
+          closedAt: DateTime.now(),
+          openingCash: (reportSummary['opening_cash'] as num).toDouble(),
+          expectedCash:
+              (reportSummary['expected_cash'] as num).toDouble(),
+          closingCash: _closingCash,
+          difference:
+              _closingCash - (reportSummary['expected_cash'] as num).toDouble(),
+          notes: _notesCtrl.text.trim().isEmpty
+              ? null
+              : _notesCtrl.text.trim(),
+          invoiceCount: (reportSummary['invoice_count'] as num).toInt(),
+          totalSales: (reportSummary['total_sales'] as num).toDouble(),
+          cashSales: (reportSummary['cash_sales'] as num).toDouble(),
+          creditSales: (reportSummary['credit_sales'] as num).toDouble(),
+          invoices: invoices.map((row) {
+            return SessionInvoice(
+              invoiceNumber: row['invoice_number'] as String,
+              occurredAt: DateTime.parse(row['occurred_at'] as String),
+              paymentMethod:
+                  (row['payment_method'] as String?) ?? 'cash',
+              total: (row['total'] as num).toDouble(),
+              customerName: row['customer_name'] as String?,
+            );
+          }).toList(),
+        );
+
+        final bytes =
+            await ReceiptService.generateSessionPdf(sessionData);
+        final reportName =
+            'Shift-' + DateFormat('yyyyMMdd-HHmm').format(DateTime.now());
+        await ReceiptService.previewPdf(bytes, reportName);
+      } catch (e) {
+        debugPrint('Shift report generation failed: ' + e.toString());
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _closing = false;
+        _error = 'فشل الإغلاق: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('إغلاق الوردية'),
+        content: SizedBox(
+          width: 420,
+          child: _loading
+              ? const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              : _error != null
+                  ? Text(_error!, style: const TextStyle(color: Colors.red))
+                  : _buildContent(),
+        ),
+        actions: _loading || _error != null
+            ? [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('إلغاء'),
+                ),
+              ]
+            : [
+                TextButton(
+                  onPressed:
+                      _closing ? null : () => Navigator.pop(context, false),
+                  child: const Text('إلغاء'),
+                ),
+                ElevatedButton(
+                  onPressed: _closing ? null : _confirmClose,
+                  child: _closing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('إغلاق الوردية'),
+                ),
+              ],
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    final s = _summary!;
+    final expected = s['expected_cash'] as double;
+    final diff = _closingCash - expected;
+    final diffColor = _closingCash == 0
+        ? Colors.grey
+        : diff == 0
+            ? Colors.green
+            : diff > 0
+                ? Colors.blue
+                : Colors.red;
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_cashierName != null)
+            _row('الكاشير', _cashierName!),
+          _row('عدد الفواتير', s['invoice_count'].toString()),
+          _row('إجمالي المبيعات', _fmt(s['total_sales'] as double)),
+          _row('منها نقد', _fmt(s['cash_sales'] as double)),
+          _row('منها آجل', _fmt(s['credit_sales'] as double)),
+          const Divider(),
+          _row('النقدية عند الفتح', _fmt(s['opening_cash'] as double)),
+          _row('المتوقع في الصندوق', _fmt(expected), bold: true),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _cashCtrl,
+            focusNode: _cashFocus,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _confirmClose(),
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+            decoration: const InputDecoration(
+              labelText: 'النقدية الفعلية (Enter للإغلاق)',
+              border: OutlineInputBorder(),
+              suffixText: 'YER',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: diffColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'الفرق:',
+                  style: TextStyle(
+                      color: diffColor, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  _fmt(diff) +
+                      (diff > 0 ? ' (زيادة)' : diff < 0 ? ' (نقص)' : ''),
+                  style: TextStyle(
+                      color: diffColor, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _notesCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'ملاحظات (اختياري)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'بعد الإغلاق ستعود إلى شاشة الدخول.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String label, String value, {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fmt(double v) {
+    final s = v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 2);
+    return s + ' YER';
+  }
+}

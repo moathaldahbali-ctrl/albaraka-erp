@@ -1,0 +1,216 @@
+import 'package:flutter/foundation.dart';
+import 'package:graphql/client.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../db/local_db.dart';
+import 'sync_manager.dart';
+
+/// v8.3.7c — مزامنة وحدات الصنف والباركود مع Hasura
+///
+/// القيود:
+///  - products يجب أن تكون موجودة في Hasura (FK)
+///  - الوحدات تُزامَن قبل الباركود (FK)
+///  - الحذف محلي فقط حالياً (soft delete في v8.3.7c-2)
+class ProductUnitsSyncService {
+  ProductUnitsSyncService._();
+  static final ProductUnitsSyncService instance = ProductUnitsSyncService._();
+
+  // ═══════════════════════════════════════════════════════════════
+  // الوحدات (product_units)
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<SyncResult> syncPendingUnits(GraphQLClient client) async {
+    final db = await LocalDatabase.instance.database;
+    final pending = await db.query(
+      'product_units_local',
+      where: "synced_at IS NULL OR synced_at = ''",
+      orderBy: 'product_id ASC',
+      limit: 200,
+    );
+
+    int synced = 0;
+    int failed = 0;
+
+    for (final unit in pending) {
+      try {
+        await _syncOneUnit(db, client, unit);
+        synced++;
+      } catch (e) {
+        failed++;
+        debugPrint('Unit sync failed for ${unit['id']}: $e');
+      }
+    }
+
+    return SyncResult(synced: synced, failed: failed, total: pending.length);
+  }
+
+  Future<void> _syncOneUnit(
+    Database db,
+    GraphQLClient client,
+    Map<String, dynamic> unit,
+  ) async {
+    final id = unit['id'] as String;
+
+    final mutation = gql(r'''
+      mutation SyncUnit($unit: product_units_insert_input!) {
+        insert_product_units_one(
+          object: $unit
+          on_conflict: {
+            constraint: product_units_pkey
+            update_columns: [unit_code, conversion_factor, is_default]
+          }
+        ) { id }
+      }
+    ''');
+
+    final variables = {
+      'unit': {
+        'id': id,
+        'product_id': unit['product_id'],
+        'unit_code': unit['unit_code'],
+        'conversion_factor': (unit['conversion_factor'] as num?)?.toDouble() ?? 1.0,
+        'is_default': (unit['is_default'] as int? ?? 0) == 1,
+      },
+    };
+
+    final result = await client.mutate(
+      MutationOptions(document: mutation, variables: variables),
+    );
+
+    if (result.hasException) {
+      final msg = result.exception.toString();
+      if (msg.contains('Uniqueness violation') ||
+          msg.contains('duplicate key')) {
+        await _markUnitSynced(db, id);
+        return;
+      }
+      throw result.exception!;
+    }
+
+    await _markUnitSynced(db, id);
+  }
+
+  Future<void> _markUnitSynced(Database db, String unitId) async {
+    await db.update(
+      'product_units_local',
+      {'synced_at': DateTime.now().toUtc().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [unitId],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // الباركود (product_barcodes)
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<SyncResult> syncPendingBarcodes(GraphQLClient client) async {
+    final db = await LocalDatabase.instance.database;
+    final pending = await db.query(
+      'product_barcodes_local',
+      where: "synced_at IS NULL OR synced_at = ''",
+      orderBy: 'product_id ASC',
+      limit: 500,
+    );
+
+    int synced = 0;
+    int failed = 0;
+
+    for (final bc in pending) {
+      try {
+        await _syncOneBarcode(db, client, bc);
+        synced++;
+      } catch (e) {
+        failed++;
+        debugPrint('Barcode sync failed for ${bc['id']}: $e');
+      }
+    }
+
+    return SyncResult(synced: synced, failed: failed, total: pending.length);
+  }
+
+  Future<void> _syncOneBarcode(
+    Database db,
+    GraphQLClient client,
+    Map<String, dynamic> bc,
+  ) async {
+    final id = bc['id'] as String;
+    final unitId = bc['product_unit_id'] as String?;
+
+    final mutation = gql(r'''
+      mutation SyncBarcode($barcode: product_barcodes_insert_input!) {
+        insert_product_barcodes_one(
+          object: $barcode
+          on_conflict: {
+            constraint: product_barcodes_pkey
+            update_columns: [barcode, product_unit_id]
+          }
+        ) { id }
+      }
+    ''');
+
+    final variables = {
+      'barcode': {
+        'id': id,
+        'product_id': bc['product_id'],
+        if (unitId != null && unitId.isNotEmpty) 'product_unit_id': unitId,
+        'barcode': bc['barcode'],
+      },
+    };
+
+    final result = await client.mutate(
+      MutationOptions(document: mutation, variables: variables),
+    );
+
+    if (result.hasException) {
+      final msg = result.exception.toString();
+      if (msg.contains('Uniqueness violation') ||
+          msg.contains('duplicate key')) {
+        await _markBarcodeSynced(db, id);
+        return;
+      }
+      throw result.exception!;
+    }
+
+    await _markBarcodeSynced(db, id);
+  }
+
+  Future<void> _markBarcodeSynced(Database db, String barcodeId) async {
+    await db.update(
+      'product_barcodes_local',
+      {'synced_at': DateTime.now().toUtc().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [barcodeId],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // المزامنة الكاملة (وحدات → باركود)
+  // ═══════════════════════════════════════════════════════════════
+
+  /// يُزامن الوحدات ثم الباركود بالترتيب الصحيح (FK)
+  Future<SyncResult> syncAll(GraphQLClient client) async {
+    int synced = 0;
+    int failed = 0;
+
+    try {
+      final unitsResult = await syncPendingUnits(client);
+      synced += unitsResult.synced;
+      failed += unitsResult.failed;
+      debugPrint(
+        '[UnitsSync] Units: synced=${unitsResult.synced}, '
+        'failed=${unitsResult.failed}, total=${unitsResult.total}',
+      );
+
+      final barcodesResult = await syncPendingBarcodes(client);
+      synced += barcodesResult.synced;
+      failed += barcodesResult.failed;
+      debugPrint(
+        '[UnitsSync] Barcodes: synced=${barcodesResult.synced}, '
+        'failed=${barcodesResult.failed}, total=${barcodesResult.total}',
+      );
+    } catch (e) {
+      debugPrint('[UnitsSync] Exception: $e');
+    }
+
+    return SyncResult(synced: synced, failed: failed, total: synced + failed);
+  }
+}

@@ -1,0 +1,12 @@
+BEGIN;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('customers.view', 'legacy', 'ط¹ط±ط¶ ط§ظ„ط¹ظ…ظ„ط§ط، (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('products.view', 'legacy', 'ط¹ط±ط¶ ط§ظ„ط£طµظ†ط§ظپ (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('session.open', 'legacy', 'ظپطھط­ ط§ظ„ظˆط±ط¯ظٹط© (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('session.close_own', 'legacy', 'ط¥ط؛ظ„ط§ظ‚ ظˆط±ط¯ظٹط© ط§ظ„ظƒط§ط´ظٹط± (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('settings.themes', 'legacy', 'ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ط«ظٹظ…ط§طھ (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('reports.inventory', 'legacy', 'طھظ‚ط±ظٹط± ط§ظ„ظ…ط®ط²ظˆظ† (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('reports.sales', 'legacy', 'طھظ‚ط±ظٹط± ط§ظ„ظ…ط¨ظٹط¹ط§طھ (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('sales.create', 'legacy', 'ط¥ظ†ط´ط§ط، ظپط§طھظˆط±ط© ط¨ظٹط¹ (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('sales.view_own', 'legacy', 'ط¹ط±ط¶ ظ…ط¨ظٹط¹ط§طھظٹ (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+INSERT INTO permissions (id, category, label_ar, is_active) VALUES ('settings.users', 'legacy', 'ط¥ط¯ط§ط±ط© ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ† (legacy)', true) ON CONFLICT (id) DO UPDATE SET category = EXCLUDED.category, label_ar = EXCLUDED.label_ar;
+COMMIT;

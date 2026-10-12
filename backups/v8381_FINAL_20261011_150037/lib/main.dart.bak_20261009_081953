@@ -1,0 +1,1040 @@
+import 'widgets/main_menu_bar.dart';
+import 'screens/reports/pos_activity_screen.dart';
+import 'screens/reports/cash_activity_screen.dart';
+import 'screens/reports/customer_activity_screen.dart';
+import 'screens/reports/stock_balance_screen.dart';
+import 'screens/about_screen.dart';
+import 'services/auth_service.dart';
+import 'screens/reports/expired_products_screen.dart';
+import 'screens/reports/alerts_screen.dart';
+import 'screens/settings/customers_manage_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:graphql/client.dart';
+import 'package:intl/intl.dart' hide TextDirection;
+
+import 'db/local_db.dart';
+import 'screens/login_screen.dart';
+import 'screens/sale_screen.dart';
+import 'widgets/close_session_dialog.dart';
+import 'widgets/opening_cash_dialog.dart';
+import 'widgets/theme_picker_dialog.dart';
+import 'sync/sync_manager.dart';
+import 'theme/app_theme.dart';
+import 'theme/theme_provider.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load();
+  await LocalDatabase.instance.database;
+  await ThemeProvider.instance.load();
+  runApp(const AlbarakaApp());
+}
+
+final GraphQLClient gqlClient = GraphQLClient(
+  link: HttpLink(
+    'https://eewgyrglhvkxjwzevcwm.hasura.ap-southeast-1.nhost.run/v1/graphql',
+    defaultHeaders: {
+      'x-hasura-admin-secret': dotenv.env['HASURA_ADMIN_SECRET'] ?? '',
+    },
+  ),
+  cache: GraphQLCache(store: InMemoryStore()),
+);
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+class AlbarakaApp extends StatefulWidget {
+  const AlbarakaApp({super.key});
+
+  @override
+  State<AlbarakaApp> createState() => _AlbarakaAppState();
+}
+
+class _AlbarakaAppState extends State<AlbarakaApp> {
+  final navigatorKey = GlobalKey<NavigatorState>();
+  bool _checking = true;
+  bool _loggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      final rows = await db.query(
+        'drafts_local',
+        where: 'key = ?',
+        whereArgs: ['current_user_id'],
+        limit: 1,
+      );
+      if (!mounted) return;
+
+      final hasUser = rows.isNotEmpty &&
+          (rows.first['value'] as String?)?.isNotEmpty == true;
+
+      setState(() {
+        _loggedIn = false;
+        _checking = false;
+      });
+
+      if (hasUser) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          await _onLoginSuccess();
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _checking = false);
+    }
+  }
+
+  Future<void> _onLoginSuccess() async {
+    final db = await LocalDatabase.instance.database;
+    final rows = await db.query(
+      'drafts_local',
+      where: 'key = ?',
+      whereArgs: ['current_user_id'],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      if (!mounted) return;
+      setState(() => _loggedIn = true);
+      return;
+    }
+    final cashierId = rows.first['value'] as String;
+
+    final active = await LocalDatabase.instance.getActiveSession();
+    if (active != null && active['cashier_id'] == cashierId) {
+      if (!mounted) return;
+      setState(() => _loggedIn = true);
+      return;
+    }
+
+    if (!mounted) return;
+    final navCtx = navigatorKey.currentContext;
+    if (navCtx == null) {
+      debugPrint('[Login] navCtx is null');
+      if (!mounted) return;
+      setState(() => _loggedIn = true);
+      return;
+    }
+    if (!navCtx.mounted) return;
+    final openingCash = await showDialog<double>(
+      context: navCtx,
+      barrierDismissible: false,
+      builder: (_) => const OpeningCashDialog(),
+    );
+
+    if (openingCash == null) return;
+
+    try {
+      await LocalDatabase.instance.openSession(
+        cashierId: cashierId,
+        openingCash: openingCash,
+        cashRegisterId: LocalDatabase.kCashRegisterId,
+        posDeviceId: LocalDatabase.kPosDeviceId,
+        branchId: LocalDatabase.kBranchId,
+        warehouseId: LocalDatabase.kWarehouseId,
+      );
+    } catch (e) {
+      debugPrint('[Login] openSession failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(navigatorKey.currentContext ?? context).showSnackBar(
+        SnackBar(content: Text('openSession failed: $e')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _loggedIn = true);
+  }
+
+  Future<void> _logout() async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      await db.delete(
+        'drafts_local',
+        where: 'key = ?',
+        whereArgs: ['current_user_id'],
+      );
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _loggedIn = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: ThemeProvider.instance.revision,
+      builder: (context, themeId, _) {
+        return ValueListenableBuilder<ThemeMode>(
+          valueListenable: ThemeProvider.instance.themeMode,
+          builder: (context, themeMode, _) {
+            final preset = ThemeProvider.instance.current;
+            return MaterialApp(
+              navigatorKey: navigatorKey,
+              title: 'Albaraka',
+              debugShowCheckedModeBanner: false,
+              theme: AppTheme.build(preset, Brightness.light),
+              darkTheme: AppTheme.build(preset, Brightness.dark),
+              themeMode: themeMode,
+              locale: const Locale('ar'),
+              builder: (context, child) {
+                return Directionality(
+                  textDirection: TextDirection.rtl,
+                  child: child ?? const SizedBox.shrink(),
+                );
+              },
+              home: _buildHome(),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildHome() {
+    if (_checking) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_loggedIn) {
+      return LoginScreen(onLoginSuccess: _onLoginSuccess);
+    }
+    return HomePage(onLogout: _logout);
+  }
+}
+
+// =============================================================================
+// HomePage — v8.1/6 (Betasys-style)
+// =============================================================================
+class HomePage extends StatefulWidget {
+  final VoidCallback? onLogout;
+  const HomePage({super.key, this.onLogout});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  // هوية بصرية فقط (من الشعار) — الألوان التفاعلية من الثيم.
+  static const Color kBrandGreen = Color(0xFF0D4722);
+  static const Color kBrandGold = Color(0xFFD4AF37);
+  static const String kBranchName = 'الفرع الرئيسي';
+  static const String kVersion = 'v9.3';
+
+  // ------------ State ------------
+  String? _cashierName;
+  List<Map<String, dynamic>> _currencies = [];
+  bool _loading = true;
+  String? _syncError;
+  bool _syncing = false;
+  int _pendingSales = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCashierName();
+    _loadLocalThenSync();
+    _refreshPendingCount();
+    _loadPermissions();
+  }
+
+  Future<void> _loadPermissions() async {
+    try {
+      await AuthService.instance.loadForCurrentUser(gqlClient);
+    } catch (e) {
+      debugPrint('Auth load error: $e');
+    }
+  }
+
+  // ------------ Data ------------
+  Future<void> _loadCashierName() async {
+    final n = await LocalDatabase.instance.getCurrentUserName();
+    if (mounted) setState(() => _cashierName = n);
+  }
+
+  Future<void> _refreshPendingCount() async {
+    final count = await LocalDatabase.instance.countPendingSales();
+    if (!mounted) return;
+    setState(() => _pendingSales = count);
+  }
+
+  Future<void> _loadLocalThenSync() async {
+    final local = await LocalDatabase.instance.getAllCurrencies();
+    if (!mounted) return;
+    setState(() {
+      _currencies = local;
+      _loading = false;
+    });
+
+    setState(() => _syncing = true);
+    try {
+      final result = await gqlClient.query(
+        QueryOptions(
+          document: gql('''
+            query {
+              currencies { id code name exchange_rate }
+              categories { slug name }
+              customers { id code name account_number phone credit_limit notes is_active }
+              users { id username display_name email branch_id pin_hash pin_salt is_active }
+              roles { id name description }
+              user_roles { user_id role_id }
+              products {
+                id
+                name
+                sku
+                standard_cost
+                sale_price
+                category { slug }
+                product_units { id unit_code conversion_factor is_default }
+                stock_balances(where: {warehouse_id: {_eq: "33333333-3333-3333-3333-333333333333"}}) {
+                  quantity
+                }
+              }
+            }
+          '''),
+          fetchPolicy: FetchPolicy.networkOnly,
+        ),
+      );
+
+      if (result.hasException) {
+        throw Exception(result.exception.toString());
+      }
+
+      final currenciesList =
+          (result.data?['currencies'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertCurrencies(currenciesList);
+
+      final categoriesList =
+          (result.data?['categories'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertCategories(categoriesList);
+
+      final customersList =
+          (result.data?['customers'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertCustomers(customersList);
+
+      final usersList =
+          (result.data?['users'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertUsers(usersList);
+
+      final rolesList =
+          (result.data?['roles'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertRoles(rolesList);
+
+      final userRolesList =
+          (result.data?['user_roles'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertUserRoles(userRolesList);
+
+      final productsRaw = (result.data?['products'] as List<dynamic>? ?? []);
+      final productsList = <Map<String, dynamic>>[];
+      final unitsList = <Map<String, dynamic>>[];
+
+      for (final p in productsRaw) {
+        final cat = p['category'];
+        final categorySlug = (cat is Map) ? cat['slug'] : null;
+        final stocks = (p['stock_balances'] as List<dynamic>? ?? []);
+        final stockQty = stocks.isNotEmpty ? stocks.first['quantity'] : null;
+        final units = (p['product_units'] as List<dynamic>? ?? []);
+
+        final defaultUnit = units.firstWhere(
+          (u) => u['is_default'] == true,
+          orElse: () => units.isNotEmpty ? units.first : null,
+        );
+
+        productsList.add({
+          'id': p['id'],
+          'name': p['name'],
+          'sku': p['sku'],
+          'standard_cost': p['standard_cost'],
+          'sale_price': p['sale_price'],
+          'unit_id': defaultUnit != null ? defaultUnit['unit_code'] : null,
+          'category_slug': categorySlug,
+          'stock_qty': stockQty,
+        });
+
+        for (final u in units) {
+          unitsList.add({
+            'id': u['id'],
+            'product_id': p['id'],
+            'unit_code': u['unit_code'],
+            'conversion_factor': u['conversion_factor'],
+            'is_default': u['is_default'] == true,
+          });
+        }
+      }
+
+      await LocalDatabase.instance.upsertProducts(productsList);
+      await LocalDatabase.instance.upsertProductUnits(unitsList);
+
+      final refreshed = await LocalDatabase.instance.getAllCurrencies();
+      if (!mounted) return;
+      setState(() {
+        _currencies = refreshed;
+        _syncError = null;
+      });
+
+      // v7.4/8: sessions before sales (FK)
+      await SyncManager.instance.syncPendingSessions(gqlClient);
+      await SyncManager.instance.syncPendingCustomers(gqlClient);
+      final syncResult =
+          await SyncManager.instance.syncPendingSales(gqlClient);
+      await _refreshPendingCount();
+
+      if (!mounted) return;
+      setState(() => _syncing = false);
+
+      if (syncResult.synced > 0) {
+        ScaffoldMessenger.of(navigatorKey.currentContext ?? context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'تمت مزامنة ${syncResult.synced} فاتورة' +
+                  (syncResult.failed > 0
+                      ? ' — فشل ${syncResult.failed}'
+                      : ''),
+            ),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _syncError = 'لا يوجد إنترنت — نعرض البيانات المحفوظة';
+        _syncing = false;
+      });
+    }
+  }
+
+  Future<void> _manualSync() async {
+    if (_syncing) return;
+    setState(() {
+      _syncing = true;
+      _syncError = null;
+    });
+    await _loadLocalThenSync();
+    await _refreshPendingCount();
+  }
+
+  Future<void> _closeSession() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const CloseSessionDialog(),
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+    widget.onLogout?.call();
+  }
+
+  Future<void> _onLogout() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تسجيل خروج'),
+        content: const Text('هل تريد تسجيل الخروج؟\n(الوردية ستبقى مفتوحة)'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('خروج'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      widget.onLogout?.call();
+    }
+  }
+
+  Future<void> _openSaleScreen() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SaleScreen()),
+    );
+    await _refreshPendingCount();
+  }
+
+  void _comingSoon(String label) {
+    ScaffoldMessenger.of(navigatorKey.currentContext ?? context).showSnackBar(
+      SnackBar(
+        content: Text('«$label» قريباً في المرحلة القادمة'),
+        backgroundColor: Colors.blueGrey,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ------------ Build ------------
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      body: Column(
+        children: [
+          MainMenuBar(
+            onNewSale: _openSaleScreen,
+            onSync: _manualSync,
+            onCloseSession: _closeSession,
+            onLogout: _onLogout,
+            onOpenPosReport: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PosActivityScreen())),
+            onOpenCashReport: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CashActivityScreen())),
+            onOpenCustomerReport: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CustomerActivityScreen())),
+            onOpenStockBalance: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StockBalanceScreen())),
+            onOpenAbout: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())),
+            onOpenExpired: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ExpiredProductsScreen())),
+            onOpenAlerts: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AlertsScreen())),
+            onOpenCustomersManage: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CustomersManageScreen())),
+            onOpenThemes: () => ThemePickerDialog.show(context),
+          ),
+          Container(height: 2, color: kBrandGold),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(child: _buildCenter(theme)),
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  child: _buildSidebar(theme),
+                ),
+              ],
+            ),
+          ),
+          _buildStatusBar(theme),
+        ],
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 50),
+        child: FloatingActionButton.extended(
+          onPressed: _openSaleScreen,
+          backgroundColor: kBrandGreen,
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add_shopping_cart),
+          label: const Text('فاتورة جديدة'),
+        ),
+      ),
+    );
+  }
+
+  // ---------- 1) Top Toolbar ----------
+  Widget _buildTopToolbar(ThemeData theme) {
+    return Container(
+      height: 78,
+      color: theme.colorScheme.surface,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          _logoCircle(56, ring: false),
+          const SizedBox(width: 8),
+          Text(
+            'البركة',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 20),
+
+          // التنقل الرئيسي
+          _navBtn(theme, Icons.shopping_cart, 'المبيعات', _openSaleScreen),
+          _navBtn(theme, Icons.shopping_basket, 'المشتريات',
+              () => _comingSoon('المشتريات')),
+          _navBtn(theme, Icons.account_balance_wallet, 'الصندوق',
+              () => _comingSoon('الصندوق')),
+          _navBtn(theme, Icons.inventory, 'المخازن',
+              () => _comingSoon('المخازن')),
+          _navBtn(theme, Icons.bar_chart, 'التقارير',
+              () => _comingSoon('التقارير')),
+          _navBtn(theme, Icons.settings, 'الإعدادات',
+              () => _comingSoon('الإعدادات')),
+
+          const Spacer(),
+
+          // Actions
+          if (_can('settings.themes'))
+          _iconBtn(
+            theme,
+            Icons.palette_outlined,
+            'الثيمات',
+            () => ThemePickerDialog.show(context),
+          ),
+          _iconBtn(
+            theme,
+            Icons.sync,
+            'مزامنة',
+            _manualSync,
+            spinning: _syncing,
+            badge: _pendingSales > 0 ? _pendingSales : null,
+          ),
+          if (_canAny(['session.close_own', 'session.close_any']))
+          _iconBtn(
+            theme,
+            Icons.lock_outline,
+            'إغلاق الوردية',
+            _closeSession,
+          ),
+          if (widget.onLogout != null)
+            _iconBtn(
+              theme,
+              Icons.logout,
+              'تسجيل خروج',
+              _onLogout,
+              color: Colors.red,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _navBtn(
+    ThemeData theme,
+    IconData icon,
+    String label,
+    VoidCallback onTap,
+  ) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 24, color: theme.colorScheme.primary),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _iconBtn(
+    ThemeData theme,
+    IconData icon,
+    String tip,
+    VoidCallback onTap, {
+    bool spinning = false,
+    int? badge,
+    Color? color,
+  }) {
+    return Tooltip(
+      message: tip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              spinning
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(icon,
+                      size: 24, color: color ?? theme.colorScheme.primary),
+              if (badge != null)
+                Positioned(
+                  right: -6,
+                  top: -6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$badge',
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 10),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- 2) Sidebar (right) ----------
+  // ---------- 2) Sidebar (right) - v9.3 permission-filtered ----------
+  bool _can(String slug) => AuthService.instance.has(slug);
+  bool _canAny(List<String> slugs) => AuthService.instance.hasAny(slugs);
+
+  Widget _buildSidebar(ThemeData theme) {
+    final allItems = <_SbItem>[
+      _SbItem('\u0641\u0627\u062a\u0648\u0631\u0629 \u062c\u062f\u064a\u062f\u0629', Icons.add_shopping_cart, _openSaleScreen,
+          enabled: true, permission: 'sales.create'),
+      _SbItem('\u0645\u0631\u062a\u062c\u0639 \u0645\u0628\u064a\u0639\u0627\u062a', Icons.remove_shopping_cart,
+          () => _comingSoon('\u0627\u0644\u0645\u0631\u062a\u062c\u0639'), permission: 'sales.return'),
+      _SbItem('\u0642\u0628\u0636 \u0646\u0642\u062f\u064a\u0629', Icons.monetization_on,
+          () => _comingSoon('\u0627\u0644\u0642\u0628\u0636'), permission: 'sales.create'),
+      _SbItem('\u0635\u0631\u0641 \u0646\u0642\u062f\u064a\u0629', Icons.money_off,
+          () => _comingSoon('\u0627\u0644\u0635\u0631\u0641'), permission: 'accounting.entry'),
+      _SbItem('\u0625\u0634\u0639\u0627\u0631 \u0628\u0646\u0643\u064a', Icons.account_balance,
+          () => _comingSoon('\u0627\u0644\u0625\u0634\u0639\u0627\u0631'), permission: 'accounting.entry'),
+      _SbItem('\u0641\u0627\u062a\u0648\u0631\u0629 \u0645\u0634\u062a\u0631\u064a\u0627\u062a', Icons.shopping_bag,
+          () => _comingSoon('\u0627\u0644\u0645\u0634\u062a\u0631\u064a\u0627\u062a'), permission: 'products.edit'),
+      _SbItem('\u0645\u0631\u062f\u0648\u062f \u0645\u0634\u062a\u0631\u064a\u0627\u062a', Icons.assignment_return,
+          () => _comingSoon('\u0645\u0631\u062f\u0648\u062f \u0627\u0644\u0645\u0634\u062a\u0631\u064a\u0627\u062a'), permission: 'products.edit'),
+      _SbItem('\u062a\u0648\u0631\u064a\u062f \u0645\u062e\u0632\u0646\u064a', Icons.archive,
+          () => _comingSoon('\u0627\u0644\u062a\u0648\u0631\u064a\u062f'), permission: 'products.edit'),
+      _SbItem('\u0635\u0631\u0641 \u0645\u062e\u0632\u0646\u064a', Icons.unarchive,
+          () => _comingSoon('\u0627\u0644\u0635\u0631\u0641 \u0627\u0644\u0645\u062e\u0632\u0646\u064a'), permission: 'products.edit'),
+    ];
+
+    final visible = allItems.where((it) {
+      if (it.permission == null) return true;
+      return _can(it.permission!);
+    }).toList();
+
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: 112,
+      color: theme.colorScheme.surface,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: visible.length,
+        itemBuilder: (_, i) => _sidebarItem(theme, visible[i]),
+      ),
+    );
+  }
+
+  Widget _sidebarItem(ThemeData theme, _SbItem it) {
+    final enabled = it.enabled;
+    return InkWell(
+      onTap: enabled ? it.onTap : null,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          border: Border.all(color: theme.dividerColor.withValues(alpha: 0.4)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              it.icon,
+              size: 28,
+              color: enabled ? kBrandGold : theme.disabledColor,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              it.label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: enabled
+                    ? theme.colorScheme.primary
+                    : theme.disabledColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------- 3) Center Area ----------
+  Widget _buildCenter(ThemeData theme) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // دوائر زخرفية
+        Positioned(
+          top: -120,
+          left: -120,
+          child: Container(
+            width: 360,
+            height: 360,
+            decoration: BoxDecoration(
+              color: kBrandGreen.withValues(alpha: 0.05),
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: -150,
+          right: -80,
+          child: Container(
+            width: 420,
+            height: 420,
+            decoration: BoxDecoration(
+              color: kBrandGold.withValues(alpha: 0.06),
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+
+        // المحتوى
+        SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              _logoCircle(150, ring: true),
+              const SizedBox(height: 16),
+              Text(
+                'بقالة وبهارات البركة',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(width: 220, height: 3, color: kBrandGold),
+              const SizedBox(height: 10),
+              Text(
+                'نظام نقاط البيع وإدارة المخزون',
+                style: TextStyle(fontSize: 16, color: theme.hintColor),
+              ),
+              const SizedBox(height: 28),
+
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                )
+              else ...[
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    _infoCard(theme, 'العملات', '${_currencies.length}'),
+                    _infoCard(
+                      theme,
+                      'فواتير معلّقة',
+                      '$_pendingSales',
+                      color: _pendingSales > 0 ? Colors.orange : null,
+                    ),
+                    _infoCard(
+                      theme,
+                      'حالة الاتصال',
+                      _syncError == null ? 'متصل' : 'أوفلاين',
+                      color: _syncError == null
+                          ? Colors.green
+                          : Colors.orange,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                if (_currencies.isNotEmpty) _currenciesCard(theme),
+              ],
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _infoCard(
+    ThemeData theme,
+    String label,
+    String value, {
+    Color? color,
+  }) {
+    return Container(
+      width: 160,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 12, color: theme.hintColor)),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: color ?? theme.colorScheme.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _currenciesCard(ThemeData theme) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 640),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.monetization_on, color: kBrandGold),
+              const SizedBox(width: 8),
+              Text(
+                'العملات المتاحة',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 20),
+          ..._currencies.map((c) {
+            final code = c['code']?.toString() ?? '';
+            final name = c['name']?.toString() ?? '';
+            final rate = c['exchange_rate']?.toString() ?? '';
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: kBrandGreen.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      code,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: kBrandGreen,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(name)),
+                  Text(
+                    rate,
+                    style:
+                        TextStyle(color: theme.hintColor, fontSize: 12),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // توقيت اليمن (UTC+3) — مستقل عن توقيت الجهاز
+  DateTime _yemenNow() =>
+      DateTime.now().toUtc().add(const Duration(hours: 3));
+
+  // ---------- 4) Status Bar ----------
+  Widget _buildStatusBar(ThemeData theme) {
+    final now = DateFormat('yyyy-MM-dd  HH:mm').format(_yemenNow());
+    final offline = _syncError != null;
+    return Container(
+      height: 34,
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Icon(Icons.person, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 4),
+          Text(_cashierName ?? '—',
+              style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 16),
+          Icon(Icons.store, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 4),
+          const Text(kBranchName, style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 16),
+          Icon(Icons.circle,
+              size: 10, color: offline ? Colors.orange : Colors.green),
+          const SizedBox(width: 4),
+          Text(offline ? 'أوفلاين' : 'متصل',
+              style: const TextStyle(fontSize: 12)),
+          const Spacer(),
+          Text(now, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 16),
+          const Text(kVersion, style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  // ---------- Helpers ----------
+  Widget _logoCircle(double size, {bool ring = false}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: ring ? Border.all(color: kBrandGold, width: 3) : null,
+        boxShadow: ring
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : null,
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/logo_color.png',
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => Icon(
+            Icons.storefront,
+            size: size * 0.5,
+            color: kBrandGreen,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SbItem {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool enabled;
+  final String? permission;
+  _SbItem(this.label, this.icon, this.onTap,
+      {this.enabled = false, this.permission});
+}

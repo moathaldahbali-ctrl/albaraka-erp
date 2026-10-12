@@ -1,0 +1,146 @@
+// lib/theme/theme_provider.dart
+// Theme state management (preset + custom color + mode)
+// Last update: 2026-10-07
+
+import 'package:flutter/material.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../db/local_db.dart';
+import 'theme_presets.dart';
+
+class ThemeProvider {
+  ThemeProvider._();
+  static final ThemeProvider instance = ThemeProvider._();
+
+  static const _kThemeKey = 'ui_theme_id';
+  static const _kModeKey = 'ui_theme_mode';
+  static const _kCustomColorKey = 'ui_custom_color';
+
+  final ValueNotifier<String> themeId =
+      ValueNotifier<String>(kDefaultThemeId);
+  final ValueNotifier<ThemeMode> themeMode =
+      ValueNotifier<ThemeMode>(ThemeMode.light);
+  final ValueNotifier<Color?> customColor = ValueNotifier<Color?>(null);
+  final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
+  bool _loaded = false;
+
+  Future<void> load() async {
+    if (_loaded) return;
+    try {
+      final db = await LocalDatabase.instance.database;
+
+      // Load theme + mode
+      final rows = await db.query(
+        'drafts_local',
+        where: 'key IN (?, ?)',
+        whereArgs: [_kThemeKey, _kModeKey],
+      );
+      for (final r in rows) {
+        final key = r['key'] as String?;
+        final val = r['value'] as String?;
+        if (val == null) continue;
+        if (key == _kThemeKey) {
+          themeId.value = presetById(val).id;
+        } else if (key == _kModeKey) {
+          themeMode.value = _parseMode(val);
+        }
+      }
+
+      // Load custom color
+      final rowsColor = await db.query(
+        'drafts_local',
+        where: 'key = ?',
+        whereArgs: [_kCustomColorKey],
+      );
+      if (rowsColor.isNotEmpty) {
+        final v = rowsColor.first['value'] as String?;
+        if (v != null && v.isNotEmpty) {
+          final parsed = int.tryParse(v);
+          if (parsed != null) {
+            customColor.value = Color(parsed);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[ThemeProvider] load failed: $e');
+    }
+    _loaded = true;
+  }
+
+  Future<void> setTheme(String id) async {
+    final preset = presetById(id);
+    themeId.value = preset.id;
+    _notify();
+    await _save(_kThemeKey, preset.id);
+  }
+
+  Future<void> setMode(ThemeMode mode) async {
+    themeMode.value = mode;
+    _notify();
+    await _save(_kModeKey, _modeToString(mode));
+  }
+
+  Future<void> setCustomColor(Color? color) async {
+    customColor.value = color;
+    // notify listeners even though themeId may not change
+    if (color != null) {
+      themeId.value = 'custom';
+    } else if (themeId.value == 'custom') {
+      themeId.value = kDefaultThemeId;
+    }
+    _notify();
+    await _save(
+      _kCustomColorKey,
+      color == null ? '' : color.toARGB32().toString(),
+    );
+  }
+
+  void _notify() => revision.value = revision.value + 1;
+
+  Future<void> _save(String key, String value) async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      await db.insert(
+        'drafts_local',
+        {
+          'key': key,
+          'value': value,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (e) {
+      debugPrint('[ThemeProvider] save failed: $e');
+    }
+  }
+
+  ThemeMode _parseMode(String s) {
+    switch (s) {
+      case 'dark':
+        return ThemeMode.dark;
+      case 'system':
+        return ThemeMode.system;
+      default:
+        return ThemeMode.light;
+    }
+  }
+
+  String _modeToString(ThemeMode m) {
+    switch (m) {
+      case ThemeMode.dark:
+        return 'dark';
+      case ThemeMode.system:
+        return 'system';
+      case ThemeMode.light:
+        return 'light';
+    }
+  }
+
+  /// Current preset (custom if set, otherwise from themeId)
+  ThemePreset get current {
+    if (customColor.value != null) {
+      return makeCustomPreset(customColor.value!);
+    }
+    return presetById(themeId.value);
+  }
+}

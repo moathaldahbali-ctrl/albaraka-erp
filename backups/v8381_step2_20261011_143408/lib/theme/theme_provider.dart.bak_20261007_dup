@@ -1,0 +1,106 @@
+// lib/theme/theme_provider.dart
+// إدارة الثيم الحالي (النمط + الوضع) — محفوظ في drafts_local
+// آخر تحديث: 2026-10-07
+
+import 'package:flutter/material.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';  // ← جديد
+import '../db/local_db.dart';
+import 'theme_presets.dart';
+
+class ThemeProvider {
+  ThemeProvider._();
+  static final ThemeProvider instance = ThemeProvider._();
+
+  static const _kThemeKey = 'ui_theme_id';
+  static const _kModeKey = 'ui_theme_mode'; // 'light' | 'dark' | 'system'
+
+  // ─── Notifiers ───
+  final ValueNotifier<String> themeId =
+      ValueNotifier<String>(kThemePresets.first.id);
+  final ValueNotifier<ThemeMode> themeMode =
+      ValueNotifier<ThemeMode>(ThemeMode.light);
+
+  bool _loaded = false;
+
+  // ─── تحميل من القاعدة ───
+  Future<void> load() async {
+    if (_loaded) return;
+    try {
+      final db = await LocalDatabase.instance.database;
+      final rows = await db.query(
+        'drafts_local',
+        where: 'key IN (?, ?)',
+        whereArgs: [_kThemeKey, _kModeKey],
+      );
+      for (final r in rows) {
+        final key = r['key'] as String?;
+        final val = r['value'] as String?;
+        if (val == null) continue;
+        if (key == _kThemeKey) {
+          themeId.value = presetById(val).id;
+        } else if (key == _kModeKey) {
+          themeMode.value = _parseMode(val);
+        }
+      }
+    } catch (e) {
+      debugPrint('[ThemeProvider] load failed: $e');
+    }
+    _loaded = true;
+  }
+
+  // ─── حفظ ───
+  Future<void> setTheme(String id) async {
+    final preset = presetById(id);
+    themeId.value = preset.id;
+    await _save(_kThemeKey, preset.id);
+  }
+
+  Future<void> setMode(ThemeMode mode) async {
+    themeMode.value = mode;
+    await _save(_kModeKey, _modeToString(mode));
+  }
+
+  Future<void> _save(String key, String value) async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      await db.insert(
+        'drafts_local',
+        {
+          'key': key,
+          'value': value,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (e) {
+      debugPrint('[ThemeProvider] save failed: $e');
+    }
+  }
+
+  // ─── Helpers ───
+  ThemeMode _parseMode(String s) {
+    switch (s) {
+      case 'dark':
+        return ThemeMode.dark;
+      case 'system':
+        return ThemeMode.system;
+      default:
+        return ThemeMode.light;
+    }
+  }
+
+  String _modeToString(ThemeMode m) {
+    switch (m) {
+      case ThemeMode.dark:
+        return 'dark';
+      case ThemeMode.system:
+        return 'system';
+      case ThemeMode.light:
+        return 'light';
+    }
+  }
+
+  /// Preset الحالي
+  ThemePreset get current => presetById(themeId.value);
+}

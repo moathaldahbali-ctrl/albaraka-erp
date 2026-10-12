@@ -1,0 +1,188 @@
+// lib/theme/app_theme.dart
+// ThemeData موحّد لنظام البركة — مستوحى من Betasys Mini
+// آخر تحديث: 2026-10-07
+
+import 'package:flutter/material.dart';
+import 'app_colors.dart';
+
+class AppTheme {
+  AppTheme._();
+
+  /// الثيم الرئيسي — يُستخدم في MaterialApp
+  static ThemeData get light {
+    final base = ThemeData.light(useMaterial3: true);
+
+    return base.copyWith(
+      // ─── الألوان الأساسية ───
+      scaffoldBackgroundColor: AppColors.background,
+      primaryColor: AppColors.headerOrange,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.headerOrange,
+        brightness: Brightness.light,
+      ).copyWith(
+        primary: AppColors.headerOrange,
+        secondary: AppColors.totalBlue,
+        surface: AppColors.background,
+        error: AppColors.warningRed,
+      ),
+
+      // ─── AppBar ───
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.headerOrange,
+        foregroundColor: AppColors.textOnDark,
+        elevation: 2,
+        centerTitle: true,
+        titleTextStyle: TextStyle(
+          color: AppColors.textOnDark,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
+        iconTheme: IconThemeData(color: AppColors.textOnDark),
+      ),
+
+      // ─── البطاقات ───
+      cardTheme: CardThemeData(
+        color: AppColors.background,
+        elevation: 1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: const BorderSide(color: AppColors.border, width: 0.5),
+        ),
+      ),
+
+      // ─── حقول الإدخال ───
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: AppColors.background,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(
+            color: AppColors.headerOrange,
+            width: 2,
+          ),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(color: AppColors.warningRed),
+        ),
+      ),
+
+      // ─── الأزرار ───
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.headerOrange,
+          foregroundColor: AppColors.textOnDark,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(4),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.totalBlue,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          textStyle: const TextStyle(fontSize: 14),
+        ),
+      ),
+
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.headerOrange,
+          side: const BorderSide(color: AppColors.headerOrange),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ),
+      ),
+
+      // ─── TextFormField ───
+      textSelectionTheme: const TextSelectionThemeData(
+        cursorColor: AppColors.headerOrange,
+        selectionColor: AppColors.orangeLight,
+        selectionHandleColor: AppColors.headerOrange,
+      ),
+
+      // ─── الجداول ───
+      dataTableTheme: DataTableThemeData(
+        headingRowColor: WidgetStateProperty.all(AppColors.headerRow),
+        headingTextStyle: const TextStyle(
+          color: AppColors.textOnDark,
+          fontWeight: FontWeight.bold,
+          fontSize: 14,
+        ),
+        dataRowColor: WidgetStateProperty.all(AppColors.background),
+        dataTextStyle: const TextStyle(
+          color: AppColors.textPrimary,
+          fontSize: 14,
+        ),
+        dividerThickness: 0.5,
+      ),
+
+      // ─── الفواصل ───
+      dividerTheme: const DividerThemeData(
+        color: AppColors.border,
+        thickness: 0.5,
+        space: 1,
+      ),
+
+      // ─── النصوص ───
+      textTheme: base.textTheme.apply(
+        bodyColor: AppColors.textPrimary,
+        displayColor: AppColors.textPrimary,
+      ),
+
+      // ─── SnackBar ───
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: AppColors.totalBlue,
+        contentTextStyle: const TextStyle(
+          color: AppColors.textOnDark,
+          fontSize: 14,
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+
+      // ─── Dialog ───
+      dialogTheme: DialogThemeData(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        titleTextStyle: const TextStyle(
+          color: AppColors.orangeDark,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+
+      // ─── Tabs ───
+      tabBarTheme: const TabBarThemeData(
+        labelColor: AppColors.textOnDark,
+        unselectedLabelColor: AppColors.textPrimary,
+        indicatorColor: AppColors.textOnDark,
+        labelStyle: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}

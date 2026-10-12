@@ -1,0 +1,814 @@
+import 'dart:math';
+import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:sqflite/sqflite.dart' as sqflite;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:uuid/uuid.dart';
+
+class LocalDatabase {
+  // v7.4 - Hardcoded IDs (single-branch, single-device v1)
+  static const String kBranchId       = '11111111-1111-1111-1111-111111111111';
+  static const String kWarehouseId    = '33333333-3333-3333-3333-333333333333';
+  static const String kCashRegisterId = '88888888-8888-8888-8888-888888888888';
+  static const String kPosDeviceId    = '66666666-6666-6666-6666-666666666666';
+  LocalDatabase._();
+  static final LocalDatabase instance = LocalDatabase._();
+
+  Database? _db;
+  static const _uuid = Uuid();
+
+  Future<Database> get database async {
+    if (_db != null) return _db!;
+    _db = await _open();
+    return _db!;
+  }
+
+  Future<Database> _open() async {
+    final isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    String dbPath;
+    if (isDesktop) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      final dir = Directory(r'D:\albaraka\data');
+      if (!await dir.exists()) { await dir.create(recursive: true); }
+      dbPath = p.join(dir.path, 'albaraka_local.db');
+    } else {
+      dbPath = p.join(await sqflite.getDatabasesPath(), 'albaraka_local.db');
+    }
+
+    return openDatabase(
+      dbPath,
+      version: 14,
+      onCreate: (db, version) async {
+        await _createCurrenciesTable(db);
+        await _createCategoriesTable(db);
+        await _createProductsTable(db);
+        await _createProductUnitsTable(db);
+        await _createSalesTables(db);
+        await _createDraftsTable(db);
+        await _createCustomersTable(db);
+        await _createUsersTables(db);
+        await _createRegisterSessionsTable(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) { await _createProductsTable(db); }
+        if (oldVersion < 3) { await _createSalesTables(db); }
+        if (oldVersion < 4) {
+          await _addColumnIfMissing(db, 'products_local', 'unit_id', 'TEXT');
+          await _addColumnIfMissing(db, 'sales_local', 'branch_id', 'TEXT');
+          await _addColumnIfMissing(db, 'sales_local', 'warehouse_id', 'TEXT');
+          await _addColumnIfMissing(db, 'sales_local', 'customer_id', 'TEXT');
+          await _addColumnIfMissing(db, 'sales_local', 'register_session_id', 'TEXT');
+          await _addColumnIfMissing(db, 'sales_local', 'occurred_at', 'TEXT');
+        }
+        if (oldVersion < 5) {
+          await db.execute('DELETE FROM sale_lines_local');
+          await db.execute('DELETE FROM sales_local');
+        }
+        if (oldVersion < 6) {
+          await _addColumnIfMissing(db, 'products_local', 'category_slug', 'TEXT');
+          await _addColumnIfMissing(db, 'products_local', 'stock_qty', 'REAL');
+        }
+        if (oldVersion < 7) {
+          await _createProductUnitsTable(db);
+          await _addColumnIfMissing(db, 'sale_lines_local', 'product_unit_id', 'TEXT');
+          await _addColumnIfMissing(db, 'sale_lines_local', 'unit_code', 'TEXT');
+          await _addColumnIfMissing(db, 'sale_lines_local', 'conversion_factor', 'REAL');
+          await _addColumnIfMissing(db, 'sales_local', 'payment_method', 'TEXT NOT NULL DEFAULT \'cash\'');
+          await _addColumnIfMissing(db, 'sales_local', 'customer_name', 'TEXT');
+        }
+        if (oldVersion < 8) { await _createCategoriesTable(db); }
+        if (oldVersion < 9) { await _createDraftsTable(db); }
+        if (oldVersion < 10) {
+          await _addColumnIfMissing(db, 'sales_local', 'paid_amount', 'REAL');
+          await _addColumnIfMissing(db, 'sales_local', 'change_amount', 'REAL');
+        }
+        if (oldVersion < 11) { await _createCustomersTable(db); }
+        if (oldVersion < 12) { await _createUsersTables(db); }
+        if (oldVersion < 13) { await _addColumnIfMissing(db, 'sales_local', 'cashier_id', 'TEXT'); }
+        if (oldVersion < 14) {
+          await _createRegisterSessionsTable(db);
+          debugPrint('[DB] v13 -> v14: register_sessions_local created');
+        }
+      },
+    );
+  }
+
+  Future<void> _addColumnIfMissing(Database db, String table, String column, String definition) async {
+    final info = await db.rawQuery('PRAGMA table_info($table)');
+    final exists = info.any((r) => r['name'] == column);
+    if (!exists) {
+      await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+    }
+  }
+
+  Future<void> _createRegisterSessionsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS register_sessions_local (
+        id                    TEXT PRIMARY KEY,
+        client_transaction_id TEXT UNIQUE,
+        cashier_id            TEXT NOT NULL,
+        cash_register_id      TEXT NOT NULL,
+        pos_device_id         TEXT NOT NULL,
+        branch_id             TEXT NOT NULL,
+        warehouse_id          TEXT NOT NULL,
+        status                TEXT NOT NULL DEFAULT 'open',
+        opened_at             TEXT NOT NULL,
+        closed_at             TEXT,
+        opening_cash          REAL NOT NULL DEFAULT 0,
+        closing_cash          REAL,
+        expected_cash         REAL,
+        difference            REAL,
+        notes                 TEXT,
+        synced_at             TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_status ON register_sessions_local(status)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_cashier ON register_sessions_local(cashier_id, status)');
+  }
+  Future<void> _createCurrenciesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS currencies_local (
+        id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
+        exchange_rate REAL NOT NULL, synced_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createCategoriesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS categories_local (
+        slug TEXT PRIMARY KEY, name TEXT NOT NULL, synced_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createProductsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS products_local (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, sku TEXT,
+        standard_cost REAL NOT NULL, sale_price REAL NOT NULL,
+        unit_id TEXT, category_slug TEXT, stock_qty REAL,
+        synced_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createProductUnitsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS product_units_local (
+        id TEXT PRIMARY KEY, product_id TEXT NOT NULL,
+        unit_code TEXT NOT NULL, conversion_factor REAL NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0, synced_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pu_product ON product_units_local(product_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pu_default ON product_units_local(product_id, is_default)');
+  }
+
+  Future<void> _createSalesTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sales_local (
+        id TEXT PRIMARY KEY, invoice_number TEXT NOT NULL UNIQUE,
+        client_transaction_id TEXT NOT NULL, total REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending', branch_id TEXT,
+        warehouse_id TEXT, customer_id TEXT, register_session_id TEXT,
+        occurred_at TEXT, created_at TEXT NOT NULL, synced_at TEXT,
+        payment_method TEXT NOT NULL DEFAULT 'cash', customer_name TEXT,
+        paid_amount REAL, change_amount REAL, cashier_id TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sale_lines_local (
+        id TEXT PRIMARY KEY, sale_id TEXT NOT NULL, product_id TEXT NOT NULL,
+        product_name TEXT NOT NULL, quantity REAL NOT NULL,
+        unit_price REAL NOT NULL, subtotal REAL NOT NULL,
+        product_unit_id TEXT, unit_code TEXT, conversion_factor REAL,
+        FOREIGN KEY (sale_id) REFERENCES sales_local (id)
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sales_status ON sales_local(status)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_lines_sale_id ON sale_lines_local(sale_id)');
+  }
+
+  Future<void> _createDraftsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS drafts_local (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createCustomersTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customers_local (
+        id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
+        account_number TEXT, phone TEXT, credit_limit REAL NOT NULL DEFAULT 0,
+        notes TEXT, is_active INTEGER NOT NULL DEFAULT 1,
+        synced_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+
+  Future<void> upsertCustomers(List<Map<String, dynamic>> customers) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (final c in customers) {
+      batch.insert('customers_local', {
+        'id': c['id'],
+        'code': c['code'].toString(),
+        'name': c['name'],
+        'account_number': c['account_number'],
+        'phone': c['phone'],
+        'credit_limit': (c['credit_limit'] as num?)?.toDouble() ?? 0,
+        'notes': c['notes'],
+        'is_active': (c['is_active'] == true) ? 1 : 0,
+        'synced_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> getCustomers() async {
+    final db = await database;
+    return db.query('customers_local', where: 'is_active = 1', orderBy: 'code ASC');
+  }
+
+  Future<List<Map<String, dynamic>>> searchCustomers(String query) async {
+    final db = await database;
+    final q = '%${query.trim()}%';
+    return db.query('customers_local',
+      where: 'is_active = 1 AND (name LIKE ? OR phone LIKE ? OR code LIKE ? OR account_number LIKE ?)',
+      whereArgs: [q, q, q, q],
+      orderBy: 'code ASC', limit: 50);
+  }
+
+  Future<int> countPendingSales() async {
+    final db = await database;
+    final r = await db.rawQuery("SELECT COUNT(*) as c FROM sales_local WHERE status = 'pending'");
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  Future<void> upsertCurrencies(List<Map<String, dynamic>> currencies) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (final c in currencies) {
+      batch.insert('currencies_local', {
+        'id': c['id'], 'code': c['code'], 'name': c['name'],
+        'exchange_rate': (c['exchange_rate'] as num).toDouble(),
+        'synced_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> upsertCategories(List<Map<String, dynamic>> categories) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (final c in categories) {
+      batch.insert('categories_local', {
+        'slug': c['slug'], 'name': c['name'], 'synced_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> upsertProducts(List<Map<String, dynamic>> products) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (final p in products) {
+      batch.insert('products_local', {
+        'id': p['id'], 'name': p['name'], 'sku': p['sku'],
+        'standard_cost': (p['standard_cost'] as num).toDouble(),
+        'sale_price': (p['sale_price'] as num).toDouble(),
+        'unit_id': p['unit_id'], 'category_slug': p['category_slug'],
+        'stock_qty': p['stock_qty'] == null ? null : (p['stock_qty'] as num).toDouble(),
+        'synced_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> upsertProductUnits(List<Map<String, dynamic>> units) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (final u in units) {
+      batch.insert('product_units_local', {
+        'id': u['id'], 'product_id': u['product_id'],
+        'unit_code': u['unit_code'],
+        'conversion_factor': (u['conversion_factor'] as num).toDouble(),
+        'is_default': (u['is_default'] == true) ? 1 : 0,
+        'synced_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> getProductUnits(String productId) async {
+    final db = await database;
+    return db.query('product_units_local',
+      where: 'product_id = ?', whereArgs: [productId],
+      orderBy: 'conversion_factor ASC');
+  }
+
+  Future<Map<String, dynamic>?> getProductById(String id) async {
+    final db = await database;
+    final r = await db.query('products_local',
+      where: 'id = ?', whereArgs: [id], limit: 1);
+    return r.isEmpty ? null : r.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getAllCurrencies() async {
+    final db = await database;
+    return db.query('currencies_local', orderBy: 'code ASC');
+  }
+
+  Future<List<Map<String, dynamic>>> getUsedCategories() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT p.category_slug AS slug, c.name AS name, COUNT(*) AS cnt
+      FROM products_local p
+      LEFT JOIN categories_local c ON c.slug = p.category_slug
+      WHERE p.category_slug IS NOT NULL
+      GROUP BY p.category_slug
+      ORDER BY c.name ASC
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> searchProducts(
+    String query, {String? categorySlug}) async {
+    final db = await database;
+    final trimmed = query.trim();
+    final whereParts = <String>[];
+    final args = <dynamic>[];
+
+    if (categorySlug != null && categorySlug.isNotEmpty) {
+      whereParts.add('category_slug = ?');
+      args.add(categorySlug);
+    }
+    if (trimmed.isNotEmpty) {
+      final words = trimmed
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+      for (final w in words) {
+        whereParts.add('(name LIKE ? OR sku LIKE ?)');
+        final q = '%' + w + '%';
+        args.add(q);
+        args.add(q);
+      }
+    }
+    final baseWhere = whereParts.isEmpty ? null : whereParts.join(' AND ');
+    final baseArgs = args.isEmpty ? null : args;
+
+    if (trimmed.isNotEmpty) {
+      final exactWhere = <String>[];
+      final exactArgs = <dynamic>[];
+      if (categorySlug != null && categorySlug.isNotEmpty) {
+        exactWhere.add('category_slug = ?'); exactArgs.add(categorySlug);
+      }
+      exactWhere.add('sku = ?'); exactArgs.add(trimmed);
+
+      final exact = await db.query('products_local',
+        where: exactWhere.join(' AND '), whereArgs: exactArgs, limit: 1);
+      if (exact.isNotEmpty) {
+        final rest = await db.query('products_local',
+          where: baseWhere == null ? 'sku != ?' : '($baseWhere) AND sku != ?',
+          whereArgs: baseArgs == null ? [trimmed] : [...baseArgs, trimmed],
+          orderBy: 'name ASC', limit: 49);
+        return [...exact, ...rest];
+      }
+    }
+    String orderBy = 'name ASC';
+    if (trimmed.isNotEmpty) {
+      final firstWord = trimmed.split(RegExp(r'\s+')).first;
+      final safeFirst = firstWord.replaceAll("'", "''");
+      orderBy = "CASE WHEN name LIKE '$safeFirst%' THEN 0 ELSE 1 END, name ASC";
+    }
+    return db.query('products_local',
+      where: baseWhere, whereArgs: baseArgs,
+      orderBy: orderBy, limit: 50);
+  }
+
+  // ============ Drafts ============
+  Future<void> saveDraft(String key, Map<String, dynamic> value) async {
+    final db = await database;
+    await db.insert('drafts_local', {
+      'key': key,
+      'value': jsonEncode(value),
+      'updated_at': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<Map<String, dynamic>?> loadDraft(String key) async {
+    final db = await database;
+    final r = await db.query('drafts_local',
+      where: 'key = ?', whereArgs: [key], limit: 1);
+    if (r.isEmpty) return null;
+    try {
+      final raw = r.first['value'] as String;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearDraft(String key) async {
+    final db = await database;
+    await db.delete('drafts_local', where: 'key = ?', whereArgs: [key]);
+  }
+
+  Future<String> _generateInvoiceNumber() async {
+    final db = await database;
+    final now = DateTime.now();
+    final ymd = now.year.toString().padLeft(4, '0') +
+        now.month.toString().padLeft(2, '0') +
+        now.day.toString().padLeft(2, '0');
+    final prefix = 'LOCAL-' + ymd + '-';
+    final r = await db.rawQuery(
+      'SELECT COUNT(*) as c FROM sales_local WHERE invoice_number LIKE ?',
+      [prefix + '%']);
+    final count = (r.first['c'] as int?) ?? 0;
+    return prefix + (count + 1).toString().padLeft(4, '0');
+  }
+
+  Future<void> _createUsersTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS users_local (
+        id              TEXT PRIMARY KEY,
+        username        TEXT UNIQUE NOT NULL,
+        display_name    TEXT,
+        email           TEXT,
+        branch_id       TEXT,
+        pin_hash        TEXT,
+        pin_salt        TEXT,
+        is_active       INTEGER DEFAULT 1,
+        failed_attempts INTEGER DEFAULT 0,
+        locked_until    TEXT,
+        synced_at       TEXT,
+        created_at      TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS roles_local (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        description TEXT,
+        synced_at   TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS user_roles_local (
+        user_id TEXT NOT NULL,
+        role_id TEXT NOT NULL,
+        PRIMARY KEY (user_id, role_id)
+      )
+    ''');
+  }
+  // ==================== Users / Roles (v7) ====================
+
+  Future<void> upsertUsers(List<Map<String, dynamic>> users) async {
+    if (users.isEmpty) return;
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((txn) async {
+      for (final u in users) {
+        await txn.rawInsert(
+          'INSERT INTO users_local '
+          '(id, username, display_name, email, branch_id, pin_hash, pin_salt, is_active, synced_at, created_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+          'ON CONFLICT(id) DO UPDATE SET '
+          'username = excluded.username, '
+          'display_name = excluded.display_name, '
+          'email = excluded.email, '
+          'branch_id = excluded.branch_id, '
+          'pin_hash = excluded.pin_hash, '
+          'pin_salt = excluded.pin_salt, '
+          'is_active = excluded.is_active, '
+          'synced_at = excluded.synced_at',
+          [
+            u['id'],
+            u['username'],
+            u['display_name'],
+            u['email'],
+            u['branch_id'],
+            u['pin_hash'],
+            u['pin_salt'],
+            (u['is_active'] == false) ? 0 : 1,
+            now,
+            u['created_at'] ?? now,
+          ],
+        );
+      }
+    });
+  }
+
+  Future<void> upsertRoles(List<Map<String, dynamic>> roles) async {
+    if (roles.isEmpty) return;
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (final r in roles) {
+      batch.insert('roles_local', {
+        'id': r['id'],
+        'name': r['name'],
+        'description': r['description'],
+        'synced_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> upsertUserRoles(List<Map<String, dynamic>> userRoles) async {
+    if (userRoles.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final ur in userRoles) {
+      batch.insert('user_roles_local', {
+        'user_id': ur['user_id'],
+        'role_id': ur['role_id'],
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<Map<String, dynamic>?> getUserByUsername(String username) async {
+    final db = await database;
+    final rows = await db.query(
+      'users_local',
+      where: 'username = ? AND is_active = 1',
+      whereArgs: [username],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<String?> getUserRoleName(String userId) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT r.name FROM user_roles_local ur '
+      'INNER JOIN roles_local r ON r.id = ur.role_id '
+      'WHERE ur.user_id = ? LIMIT 1',
+      [userId],
+    );
+    return rows.isEmpty ? null : rows.first['name'] as String?;
+  }
+
+  Future<void> recordFailedAttempt(String userId, int newCount, String? lockedUntil) async {
+    final db = await database;
+    await db.update(
+      'users_local',
+      {'failed_attempts': newCount, 'locked_until': lockedUntil},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
+  Future<void> resetFailedAttempts(String userId) async {
+    final db = await database;
+    await db.update(
+      'users_local',
+      {'failed_attempts': 0, 'locked_until': null},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+  String _newId(String prefix) => _uuid.v4();
+
+  Future<String?> _getCurrentUserId() async {
+    final db = await database;
+    final rows = await db.query('drafts_local', where: 'key = ?', whereArgs: ['current_user_id'], limit: 1);
+    return rows.isNotEmpty ? rows.first['value'] as String? : null;
+  }
+
+  Future<String?> getCurrentUserId() async {
+    return _getCurrentUserId();
+  }
+  Future<String?> getCurrentUserName() async {
+    final userId = await _getCurrentUserId();
+    if (userId == null) return null;
+    final db = await database;
+    final rows = await db.query(
+      'users_local',
+      columns: ['display_name', 'username'],
+      where: 'id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final r = rows.first;
+    final name = r['display_name'] ?? r['username'];
+    return name?.toString();
+  }
+
+  Future<Map<String, dynamic>> saveInvoice({
+    required List<Map<String, dynamic>> items,
+    required double total,
+    String paymentMethod = 'cash',
+    String? customerName,
+    String? customerId,
+    double? paidAmount,
+    double? changeAmount,
+    String? cashierId,
+  }) async {
+    if (items.isEmpty) throw Exception('الفاتورة فارغة');
+    final db = await database;
+    final now = DateTime.now();
+    final invoiceNumber = await _generateInvoiceNumber();
+    final saleId = _newId('sale');
+    final clientTxId = _newId('tx');
+    final effectiveCashierId = cashierId ?? await _getCurrentUserId();
+    final activeSession = await getActiveSession();
+    if (activeSession == null) {
+      throw Exception('\u0644\u0627 \u062a\u0648\u062c\u062f \u0648\u0631\u062f\u064a\u0629 \u0645\u0641\u062a\u0648\u062d\u0629');
+    }
+    final activeSessionId = activeSession['id'] as String;
+
+
+    await db.transaction((txn) async {
+      await txn.insert('sales_local', {
+        'id': saleId, 'invoice_number': invoiceNumber,
+        'client_transaction_id': clientTxId, 'total': total,
+        'status': 'pending',
+        'branch_id': '11111111-1111-1111-1111-111111111111',
+        'warehouse_id': '33333333-3333-3333-3333-333333333333',
+        'customer_id': customerId ?? '77777777-7777-7777-7777-777777777777',
+        'register_session_id': activeSessionId,
+        'occurred_at': now.toUtc().toIso8601String(),
+        'created_at': now.toIso8601String(),
+        'synced_at': null,
+        'payment_method': paymentMethod,
+        'customer_name': customerName,
+        'paid_amount': paidAmount,
+        'change_amount': changeAmount,
+        'cashier_id': effectiveCashierId,
+      });
+      for (final it in items) {
+        await txn.insert('sale_lines_local', {
+          'id': _newId('line'), 'sale_id': saleId,
+          'product_id': it['product_id'], 'product_name': it['product_name'],
+          'quantity': it['quantity'], 'unit_price': it['unit_price'],
+          'subtotal': it['subtotal'],
+          'product_unit_id': it['product_unit_id'],
+          'unit_code': it['unit_code'],
+          'conversion_factor': it['conversion_factor'],
+        });
+      }
+    });
+
+    return {'id': saleId, 'invoice_number': invoiceNumber, 'total': total};
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // v7.4 — Register Sessions
+  // ═══════════════════════════════════════════════════════════
+
+  Future<String> openSession({
+    required String cashierId,
+    required double openingCash,
+    required String cashRegisterId,
+    required String posDeviceId,
+    required String branchId,
+    required String warehouseId,
+    String? notes,
+  }) async {
+    final db = await database;
+    final existing = await db.query(
+      'register_sessions_local',
+      where: 'cashier_id = ? AND status = ?',
+      whereArgs: [cashierId, 'open'],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) {
+      final existingId = existing.first['id'] as String;
+      debugPrint('[Sessions] reusing existing: ' + existingId);
+      return existingId;
+    }
+    final id = _generateUuidV4();
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.insert('register_sessions_local', {
+      'id': id,
+      'client_transaction_id': id,
+      'cashier_id': cashierId,
+      'cash_register_id': cashRegisterId,
+      'pos_device_id': posDeviceId,
+      'branch_id': branchId,
+      'warehouse_id': warehouseId,
+      'status': 'open',
+      'opened_at': now,
+      'opening_cash': openingCash,
+      'notes': ?notes,
+    });
+    debugPrint('[Sessions] opened ' + id);
+    return id;
+  }
+
+  Future<Map<String, dynamic>?> getActiveSession() async {
+    final db = await database;
+    final rows = await db.query(
+      'register_sessions_local',
+      where: 'status = ?',
+      whereArgs: ['open'],
+      orderBy: 'opened_at DESC',
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<List<Map<String, dynamic>>> getSessionInvoices(
+      String sessionId) async {
+    final db = await database;
+    return db.query(
+      'sales_local',
+      columns: [
+        'invoice_number', 'occurred_at', 'payment_method',
+        'total', 'customer_name',
+      ],
+      where: 'register_session_id = ?',
+      whereArgs: [sessionId],
+      orderBy: 'occurred_at ASC',
+    );
+  }
+
+  Future<Map<String, dynamic>> getSessionSummary(String sessionId) async {
+    final db = await database;
+    final session = (await db.query(
+      'register_sessions_local',
+      where: 'id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    )).first;
+    final totals = await db.rawQuery('''
+      SELECT
+        COUNT(*) AS invoice_count,
+        COALESCE(SUM(total), 0) AS total_sales,
+        COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total ELSE 0 END), 0) AS cash_sales,
+        COALESCE(SUM(CASE WHEN payment_method = 'credit' THEN total ELSE 0 END), 0) AS credit_sales
+      FROM sales_local
+      WHERE register_session_id = ?
+    ''', [sessionId]);
+    final t = totals.first;
+    final openingCash = (session['opening_cash'] as num?)?.toDouble() ?? 0;
+    final cashSales = (t['cash_sales'] as num?)?.toDouble() ?? 0;
+    return {
+      'session': session,
+      'invoice_count': (t['invoice_count'] as num?)?.toInt() ?? 0,
+      'total_sales': (t['total_sales'] as num?)?.toDouble() ?? 0,
+      'cash_sales': cashSales,
+      'credit_sales': (t['credit_sales'] as num?)?.toDouble() ?? 0,
+      'opening_cash': openingCash,
+      'expected_cash': openingCash + cashSales,
+    };
+  }
+
+  Future<void> closeSession({
+    required String sessionId,
+    required double closingCash,
+    String? notes,
+  }) async {
+    final db = await database;
+    final summary = await getSessionSummary(sessionId);
+    final expected = summary['expected_cash'] as double;
+    final diff = closingCash - expected;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.update(
+      'register_sessions_local',
+      {
+        'status': 'closed',
+        'closed_at': now,
+        'closing_cash': closingCash,
+        'expected_cash': expected,
+        'difference': diff,
+        'notes': ?notes,
+      },
+      where: 'id = ?',
+      whereArgs: [sessionId],
+    );
+    debugPrint('[Sessions] closed ' + sessionId);
+  }
+
+  String _generateUuidV4() {
+    final rnd = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    String h(int b) => b.toRadixString(16).padLeft(2, '0');
+    final s = bytes.map(h).join();
+    return s.substring(0, 8) + '-' +
+           s.substring(8, 12) + '-' +
+           s.substring(12, 16) + '-' +
+           s.substring(16, 20) + '-' +
+           s.substring(20);
+  }
+}
+

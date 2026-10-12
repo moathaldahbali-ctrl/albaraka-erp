@@ -1,0 +1,78 @@
+// tools/sync_categories.dart
+// v8.3.8.1 — سحب التصنيفات من Hasura إلى المحلي
+import 'package:graphql/client.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+Future<void> main() async {
+  sqfliteFfiInit();
+  await dotenv.load();
+
+  final secret = dotenv.env['HASURA_ADMIN_SECRET'] ?? '';
+  if (secret.isEmpty) {
+    print('ERROR: HASURA_ADMIN_SECRET not found');
+    return;
+  }
+
+  final client = GraphQLClient(
+    link: HttpLink(
+      'https://eewgyrglhvkxjwzevcwm.hasura.ap-southeast-1.nhost.run/v1/graphql',
+      defaultHeaders: {'x-hasura-admin-secret': secret},
+    ),
+    cache: GraphQLCache(),
+  );
+
+  final q = gql(r'''
+    query GetCategories {
+      categories(order_by: {name: asc}) {
+        id
+        slug
+        name
+        parent_id
+      }
+    }
+  ''');
+
+  final result = await client.query(QueryOptions(document: q));
+  if (result.hasException) {
+    print('ERROR: ' + result.exception.toString());
+    return;
+  }
+
+  final cats = result.data!['categories'] as List;
+  print('Fetched from Hasura: ' + cats.length.toString());
+
+  final db = await databaseFactoryFfi.openDatabase(
+    r'D:\albaraka\data\albaraka_local.db',
+  );
+
+  int inserted = 0;
+  await db.transaction((txn) async {
+    for (final c in cats) {
+      await txn.insert(
+        'categories_local',
+        {
+          'slug': c['slug'] as String,
+          'name': c['name'] as String,
+          'parent_id': c['parent_id'],
+          'synced_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      inserted++;
+    }
+  });
+
+  print('Upserted locally: ' + inserted.toString());
+
+  final check = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM categories_local WHERE parent_id IS NOT NULL');
+  print('Children with parent: ' + check.first['c'].toString());
+
+  final check2 = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM categories_local WHERE parent_id IS NULL');
+  print('Roots: ' + check2.first['c'].toString());
+
+  await db.close();
+  print('DONE');
+}

@@ -1,0 +1,555 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:graphql/client.dart';
+
+import 'db/local_db.dart';
+import 'screens/login_screen.dart';
+import 'screens/sale_screen.dart';
+import 'widgets/close_session_dialog.dart';
+import 'widgets/opening_cash_dialog.dart';
+import 'sync/sync_manager.dart';
+import 'theme/app_theme.dart';
+import 'theme/theme_provider.dart';
+import 'theme/theme_presets.dart';
+import 'widgets/theme_picker_dialog.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load();
+  await LocalDatabase.instance.database;
+  runApp(const AlbarakaApp());
+}
+
+final GraphQLClient gqlClient = GraphQLClient(
+  link: HttpLink(
+    'https://eewgyrglhvkxjwzevcwm.hasura.ap-southeast-1.nhost.run/v1/graphql',
+    defaultHeaders: {
+      'x-hasura-admin-secret': dotenv.env['HASURA_ADMIN_SECRET'] ?? '',
+    },
+  ),
+  cache: GraphQLCache(store: InMemoryStore()),
+);
+
+class AlbarakaApp extends StatefulWidget {
+  const AlbarakaApp({super.key});
+
+  @override
+  State<AlbarakaApp> createState() => _AlbarakaAppState();
+}
+
+class _AlbarakaAppState extends State<AlbarakaApp> {
+  final _navKey = GlobalKey<NavigatorState>();
+  bool _checking = true;
+  bool _loggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      final rows = await db.query(
+        'drafts_local',
+        where: 'key = ?',
+        whereArgs: ['current_user_id'],
+        limit: 1,
+      );
+      if (!mounted) return;
+
+      final hasUser = rows.isNotEmpty &&
+          (rows.first['value'] as String?)?.isNotEmpty == true;
+
+      setState(() {
+        _loggedIn = false;
+        _checking = false;
+      });
+
+      if (hasUser) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          await _onLoginSuccess();
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _checking = false);
+    }
+  }
+
+  Future<void> _onLoginSuccess() async {
+    final db = await LocalDatabase.instance.database;
+    final rows = await db.query(
+      'drafts_local',
+      where: 'key = ?',
+      whereArgs: ['current_user_id'],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      if (!mounted) return;
+      setState(() => _loggedIn = true);
+      return;
+    }
+    final cashierId = rows.first['value'] as String;
+
+    final active = await LocalDatabase.instance.getActiveSession();
+    if (active != null && active['cashier_id'] == cashierId) {
+      if (!mounted) return;
+      setState(() => _loggedIn = true);
+      return;
+    }
+
+    if (!mounted) return;
+    final navCtx = _navKey.currentContext;
+    if (navCtx == null) {
+      debugPrint('[Login] navCtx is null');
+      if (!mounted) return;
+      setState(() => _loggedIn = true);
+      return;
+    }
+    if (!navCtx.mounted) return;
+    final openingCash = await showDialog<double>(
+      context: navCtx,
+      barrierDismissible: false,
+      builder: (_) => const OpeningCashDialog(),
+    );
+
+    if (openingCash == null) return;
+
+    try {
+      await LocalDatabase.instance.openSession(
+        cashierId: cashierId,
+        openingCash: openingCash,
+        cashRegisterId: LocalDatabase.kCashRegisterId,
+        posDeviceId: LocalDatabase.kPosDeviceId,
+        branchId: LocalDatabase.kBranchId,
+        warehouseId: LocalDatabase.kWarehouseId,
+      );
+    } catch (e) {
+      debugPrint('[Login] openSession failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('openSession failed: $e')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _loggedIn = true);
+  }
+
+  Future<void> _logout() async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      await db.delete(
+        'drafts_local',
+        where: 'key = ?',
+        whereArgs: ['current_user_id'],
+      );
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _loggedIn = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: ThemeProvider.instance.themeId,
+      builder: (context, themeId, _) {
+        return ValueListenableBuilder<ThemeMode>(
+          valueListenable: ThemeProvider.instance.themeMode,
+          builder: (context, themeMode, _) {
+            final preset = ThemeProvider.instance.current;
+            return MaterialApp(
+              navigatorKey: _navKey,
+              title: 'Albaraka',
+              debugShowCheckedModeBanner: false,
+              theme: AppTheme.build(preset, Brightness.light),
+              darkTheme: AppTheme.build(preset, Brightness.dark),
+              themeMode: themeMode,
+              locale: const Locale('ar'),
+              builder: (context, child) {
+                return Directionality(
+                  textDirection: TextDirection.rtl,
+                  child: child ?? const SizedBox.shrink(),
+                );
+              },
+              home: _buildHome(),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildHome() {
+    if (_checking) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_loggedIn) {
+      return LoginScreen(onLoginSuccess: _onLoginSuccess);
+    }
+    return HomePage(onLogout: _logout);
+  }
+}
+class HomePage extends StatefulWidget {
+  final VoidCallback? onLogout;
+  const HomePage({super.key, this.onLogout});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  String? _cashierName;
+
+  Future<void> _loadCashierName() async {
+    final n = await LocalDatabase.instance.getCurrentUserName();
+    if (mounted) setState(() => _cashierName = n);
+  }
+
+  List<Map<String, dynamic>> _currencies = [];
+  bool _loading = true;
+  String? _syncError;
+  bool _syncing = false;
+  int _pendingSales = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCashierName();
+    _loadLocalThenSync();
+    _refreshPendingCount();
+  }
+
+  Future<void> _refreshPendingCount() async {
+    final count = await LocalDatabase.instance.countPendingSales();
+    if (!mounted) return;
+    setState(() => _pendingSales = count);
+  }
+
+  Future<void> _loadLocalThenSync() async {
+    final local = await LocalDatabase.instance.getAllCurrencies();
+    setState(() {
+      _currencies = local;
+      _loading = false;
+    });
+
+    setState(() => _syncing = true);
+    try {
+      final result = await gqlClient.query(
+        QueryOptions(
+          document: gql('''
+            query {
+              currencies { id code name exchange_rate }
+              categories { slug name }
+              customers { id code name account_number phone credit_limit notes is_active }
+              users { id username display_name email branch_id pin_hash pin_salt is_active }
+              roles { id name description }
+              user_roles { user_id role_id }
+              products {
+                id
+                name
+                sku
+                standard_cost
+                sale_price
+                category { slug }
+                product_units { id unit_code conversion_factor is_default }
+                stock_balances(where: {warehouse_id: {_eq: "33333333-3333-3333-3333-333333333333"}}) {
+                  quantity
+                }
+              }
+            }
+          '''),
+          fetchPolicy: FetchPolicy.networkOnly,
+        ),
+      );
+
+      if (result.hasException) {
+        throw Exception(result.exception.toString());
+      }
+
+      final currenciesList =
+          (result.data?['currencies'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertCurrencies(currenciesList);
+
+      final categoriesList =
+          (result.data?['categories'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertCategories(categoriesList);
+
+      final customersList =
+          (result.data?['customers'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertCustomers(customersList);
+
+      final usersList =
+          (result.data?['users'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertUsers(usersList);
+
+      final rolesList =
+          (result.data?['roles'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertRoles(rolesList);
+
+      final userRolesList =
+          (result.data?['user_roles'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+      await LocalDatabase.instance.upsertUserRoles(userRolesList);
+
+      final productsRaw = (result.data?['products'] as List<dynamic>? ?? []);
+      final productsList = <Map<String, dynamic>>[];
+      final unitsList = <Map<String, dynamic>>[];
+
+      for (final p in productsRaw) {
+        final cat = p['category'];
+        final categorySlug = (cat is Map) ? cat['slug'] : null;
+        final stocks = (p['stock_balances'] as List<dynamic>? ?? []);
+        final stockQty =
+            stocks.isNotEmpty ? stocks.first['quantity'] : null;
+        final units = (p['product_units'] as List<dynamic>? ?? []);
+
+        final defaultUnit = units.firstWhere(
+          (u) => u['is_default'] == true,
+          orElse: () => units.isNotEmpty ? units.first : null,
+        );
+
+        productsList.add({
+          'id': p['id'],
+          'name': p['name'],
+          'sku': p['sku'],
+          'standard_cost': p['standard_cost'],
+          'sale_price': p['sale_price'],
+          'unit_id': defaultUnit != null ? defaultUnit['unit_code'] : null,
+          'category_slug': categorySlug,
+          'stock_qty': stockQty,
+        });
+
+        for (final u in units) {
+          unitsList.add({
+            'id': u['id'],
+            'product_id': p['id'],
+            'unit_code': u['unit_code'],
+            'conversion_factor': u['conversion_factor'],
+            'is_default': u['is_default'] == true,
+          });
+        }
+      }
+
+      await LocalDatabase.instance.upsertProducts(productsList);
+      await LocalDatabase.instance.upsertProductUnits(unitsList);
+
+      final refreshed = await LocalDatabase.instance.getAllCurrencies();
+      if (!mounted) return;
+      setState(() {
+        _currencies = refreshed;
+        _syncError = null;
+      });
+
+      final syncResult =
+          // v7.4/8: sessions before sales (FK)
+
+          await SyncManager.instance.syncPendingSessions(gqlClient);
+
+          await SyncManager.instance.syncPendingSales(gqlClient);
+      await _refreshPendingCount();
+
+      if (!mounted) return;
+      setState(() => _syncing = false);
+
+      if (syncResult.synced > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تمت مزامنة ' +
+                syncResult.synced.toString() +
+                ' فاتورة' +
+                (syncResult.failed > 0
+                    ? ' — فشل ' + syncResult.failed.toString()
+                    : '')),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _syncError = 'لا يوجد إنترنت — نعرض البيانات المحفوظة';
+        _syncing = false;
+      });
+    }
+  }
+
+  Future<void> _manualSync() async {
+    setState(() {
+      _syncing = true;
+      _syncError = null;
+    });
+    await _loadLocalThenSync();
+    await _refreshPendingCount();
+  }
+
+  Future<void> _closeSession() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const CloseSessionDialog(),
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+    widget.onLogout?.call();
+  }
+
+  Future<void> _openSaleScreen() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SaleScreen()),
+    );
+    await _refreshPendingCount();
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Image.asset('assets/logo_color.png', height: 40),
+        ),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('بقالة وبهارات البركة',
+                style: TextStyle(fontSize: 17)),
+            if (_cashierName != null && _cashierName!.isNotEmpty)
+              Text('الكاشير: $_cashierName',
+                  style: TextStyle(fontSize: 11)),
+          ],
+        ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.palette),
+            tooltip: '\u0627\u0644\u062B\u064A\u0645',
+            onPressed: () => ThemePickerDialog.show(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.sync),
+            tooltip: 'مزامنة',
+            onPressed: _syncing ? null : _manualSync,
+          ),
+          IconButton(
+            icon: const Icon(Icons.lock_outline),
+            tooltip: 'إغلاق الوردية',
+            onPressed: _closeSession,
+          ),
+          if (widget.onLogout != null)
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'تسجيل خروج',
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('تسجيل خروج'),
+                    content: const Text('هل تريد تسجيل الخروج؟'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('إلغاء'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('خروج'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok == true && mounted) {
+                  widget.onLogout!();
+                }
+              },
+            ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.08,
+              child: Image.asset(
+                'assets/logo_color.png',
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+          _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                if (_syncError != null)
+                  Container(
+                    width: double.infinity,
+                    color: Colors.orange.shade100,
+                    padding: const EdgeInsets.all(8),
+                    child: Text(
+                      _syncError!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.deepOrange),
+                    ),
+                  ),
+                if (_syncing) const LinearProgressIndicator(),
+                Expanded(
+                  child: _currencies.isEmpty
+                      ? const Center(child: Text('لا توجد بيانات'))
+                      : ListView.builder(
+                          itemCount: _currencies.length,
+                          itemBuilder: (context, i) {
+                            final c = _currencies[i];
+                            return ListTile(
+                              leading: const Icon(Icons.monetization_on),
+                              title: Text(c['code'].toString() +
+                                  ' — ' +
+                                  c['name'].toString()),
+                              subtitle: Text('سعر الصرف: ' +
+                                  c['exchange_rate'].toString()),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openSaleScreen,
+        icon: const Icon(Icons.add_shopping_cart),
+        label: const Text('فاتورة جديدة'),
+      ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.all(12),
+        color: Colors.green.shade50,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            Text(
+              'العملات: ' + _currencies.length.toString(),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'فواتير معلّقة: ' + _pendingSales.toString(),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color:
+                    _pendingSales > 0 ? Colors.deepOrange : Colors.black87,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

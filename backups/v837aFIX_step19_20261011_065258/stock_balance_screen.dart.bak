@@ -1,0 +1,910 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart' hide TextDirection;
+import '../../db/local_db.dart';
+
+/// v8.3.7a — شاشة بيانات الأصناف (نمط البركة)
+/// 4 تبويبات: القائمة · الشجرة · الحركة · البطاقة
+class StockBalanceScreen extends StatefulWidget {
+  const StockBalanceScreen({super.key});
+
+  @override
+  State<StockBalanceScreen> createState() => _StockBalanceScreenState();
+}
+
+class _StockBalanceScreenState extends State<StockBalanceScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabCtrl;
+
+  // Data
+  List<Map<String, dynamic>> _products = [];
+  List<Map<String, dynamic>> _categories = [];
+  List<Map<String, dynamic>> _movements = [];
+  Map<String, String> _catNames = {};
+  Map<String, dynamic>? _selectedProduct;
+  List<Map<String, dynamic>> _productUnits = [];
+
+  // State
+  bool _loading = true;
+  String _search = '';
+  String _categoryFilter = '';
+  String _stockFilter = 'all';
+  final TextEditingController _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
+  bool _movementsLoaded = false;
+
+  // Stats
+  int _countAll = 0, _countZero = 0, _countLow = 0;
+  double _sumValue = 0;
+
+  static const int kLowThreshold = 10;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl.addListener(_onTabChanged);
+    _searchCtrl.addListener(_onSearchChanged);
+    _bootstrap();
+  }
+
+  void _onTabChanged() {
+    // Lazy-load الحركات عند فتح التبويب 3
+    if (_tabCtrl.index == 2 && !_movementsLoaded) {
+      _movementsLoaded = true;
+      _loadMovements();
+    }
+  }
+
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      setState(() => _search = _searchCtrl.text);
+      _loadProducts();
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _tabCtrl.removeListener(_onTabChanged);
+    _searchCtrl.removeListener(_onSearchChanged);
+    _tabCtrl.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // ---------- Loaders ----------
+  Future<void> _bootstrap() async {
+    await _loadCategories();
+    await _loadStats();
+    await _loadProducts();
+    // _loadMovements → lazy عند فتح التبويب 3
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _loadCategories() async {
+    final db = await LocalDatabase.instance.database;
+    try {
+      final cats = await db.rawQuery(
+          "SELECT slug, name FROM categories_local ORDER BY name ASC");
+      _catNames = {};
+      for (final c in cats) {
+        _catNames[(c['slug'] as String?) ?? ''] = (c['name'] as String?) ?? '';
+      }
+      final used = await db.rawQuery('''
+        SELECT DISTINCT category_slug FROM products_local
+        WHERE category_slug IS NOT NULL AND category_slug != ''
+        ORDER BY category_slug ASC
+      ''');
+      _categories = used.map((r) {
+        final slug = r['category_slug'] as String? ?? '';
+        return <String, dynamic>{
+          'slug': slug,
+          'name': _catNames[slug] ?? slug,
+        };
+      }).toList();
+    } catch (_) {
+      _categories = [];
+    }
+  }
+
+  Future<void> _loadStats() async {
+    final db = await LocalDatabase.instance.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN stock_qty <= 0 THEN 1 ELSE 0 END) AS zero_count,
+        SUM(CASE WHEN stock_qty > 0 AND stock_qty < $kLowThreshold THEN 1 ELSE 0 END) AS low_count,
+        COALESCE(SUM(stock_qty * COALESCE(standard_cost, 0)), 0) AS total_value
+      FROM products_local
+    ''');
+    if (rows.isNotEmpty) {
+      final r = rows.first;
+      _countAll = (r['total'] as num?)?.toInt() ?? 0;
+      _countZero = (r['zero_count'] as num?)?.toInt() ?? 0;
+      _countLow = (r['low_count'] as num?)?.toInt() ?? 0;
+      _sumValue = (r['total_value'] as num?)?.toDouble() ?? 0;
+    }
+  }
+
+  Future<void> _loadProducts() async {
+    String stockWhere = '';
+    if (_stockFilter == 'zero') {
+      stockWhere = 'AND stock_qty <= 0';
+    } else if (_stockFilter == 'low') {
+      stockWhere = 'AND stock_qty > 0 AND stock_qty < $kLowThreshold';
+    } else if (_stockFilter == 'has') {
+      stockWhere = 'AND stock_qty > 0';
+    }
+
+    String catWhere = '';
+    if (_categoryFilter.isNotEmpty) {
+      final safe = _categoryFilter.replaceAll("'", "''");
+      catWhere = "AND category_slug = '$safe'";
+    }
+
+    String searchWhere = '';
+    if (_search.trim().isNotEmpty) {
+      final s = _search.trim().replaceAll("'", "''");
+      searchWhere = "AND (name LIKE '%$s%' OR sku LIKE '%$s%')";
+    }
+
+    // v8.3.7a-FIX — استخدام searchProductsWithUnits (JOIN) + فلترة Dart
+    final rows = await LocalDatabase.instance.searchProductsWithUnits(
+      _search.trim(),
+      categorySlug: _categoryFilter.isEmpty ? null : _categoryFilter,
+      limit: 2000,
+    );
+
+    // فلترة المخزون في Dart (أسرع من SQL مع JOIN)
+    final filtered = rows.where((p) {
+      final q = (p['stock_qty'] as num?)?.toDouble() ?? 0;
+      if (_stockFilter == 'zero') return q <= 0;
+      if (_stockFilter == 'low') return q > 0 && q < kLowThreshold;
+      if (_stockFilter == 'has') return q > 0;
+      return true;
+    }).toList();
+
+    if (mounted) setState(() => _products = filtered);
+  }
+
+  Future<void> _loadMovements() async {
+    final db = await LocalDatabase.instance.database;
+    try {
+      final rows = await db.rawQuery('''
+        SELECT sl.product_id, sl.product_name, sl.quantity, sl.unit_price,
+               sl.subtotal, s.invoice_number, s.occurred_at, s.payment_method
+        FROM sale_lines_local sl
+        JOIN sales_local s ON s.id = sl.sale_id
+        ORDER BY s.occurred_at DESC
+        LIMIT 200
+      ''');
+      if (mounted) setState(() => _movements = rows);
+    } catch (_) {
+      _movements = [];
+    }
+  }
+
+  Future<void> _loadProductUnits(String productId) async {
+    final db = await LocalDatabase.instance.database;
+    try {
+      final rows = await db.rawQuery('''
+        SELECT id, unit_code, conversion_factor, is_default
+        FROM product_units_local
+        WHERE product_id = ?
+        ORDER BY is_default DESC, conversion_factor ASC
+      ''', [productId]);
+      if (mounted) setState(() => _productUnits = rows);
+    } catch (_) {
+      _productUnits = [];
+    }
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _loading = true);
+    await _loadStats();
+    await _loadProducts();
+    await _loadMovements();
+    if (mounted) setState(() => _loading = false);
+  }
+
+  void _selectProduct(Map<String, dynamic> p) {
+    setState(() => _selectedProduct = p);
+    _loadProductUnits(p['id'] as String);
+    _tabCtrl.animateTo(3);
+  }
+
+  // ---------- Helpers ----------
+  String _fmtNum(num n) => NumberFormat('#,##0.##').format(n);
+
+  String _fmtDate(String? iso) {
+    if (iso == null) return '-';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return '-';
+    return DateFormat('MM/dd').format(d);
+  }
+
+  String _fmtDateTime(String? iso) {
+    if (iso == null) return '-';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return '-';
+    return DateFormat('MM/dd HH:mm').format(d);
+  }
+
+  String _catLabel(String? slug) {
+    if (slug == null || slug.isEmpty) return '-';
+    return _catNames[slug] ?? slug;
+  }
+
+  Color _stockColor(double qty) {
+    if (qty <= 0) return Colors.red;
+    if (qty < kLowThreshold) return Colors.orange;
+    return Colors.green;
+  }
+
+  // ---------- Build ----------
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('بيانات الأصناف'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _refresh,
+              tooltip: 'تحديث',
+            ),
+          ],
+          bottom: TabBar(
+            controller: _tabCtrl,
+            tabs: const [
+              Tab(icon: Icon(Icons.list), text: 'القائمة'),
+              Tab(icon: Icon(Icons.account_tree), text: 'الشجرة'),
+              Tab(icon: Icon(Icons.history), text: 'الحركة'),
+              Tab(icon: Icon(Icons.badge), text: 'البطاقة'),
+            ],
+          ),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  _buildStats(theme),
+                  _buildFilters(theme),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabCtrl,
+                      children: [
+                        _buildListTab(theme),
+                        _buildTreeTab(theme),
+                        _buildMovementTab(theme),
+                        _buildDetailsTab(theme),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  // ---------- Stats ----------
+  Widget _buildStats(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          _statCard(theme, 'إجمالي', '$_countAll', '', Colors.blue),
+          const SizedBox(width: 6),
+          _statCard(theme, 'نفد', '$_countZero', '', Colors.red),
+          const SizedBox(width: 6),
+          _statCard(theme, 'منخفض', '$_countLow', '', Colors.orange),
+          const SizedBox(width: 6),
+          _statCard(theme, 'قيمة المخزون', '', _fmtNum(_sumValue),
+              theme.colorScheme.primary),
+          const SizedBox(width: 6),
+          _statCard(theme, 'تصنيفات', '${_categories.length}', '',
+              Colors.purple),
+        ],
+      ),
+    );
+  }
+
+  Widget _statCard(ThemeData theme, String title, String count, String amount,
+      Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: TextStyle(
+                    fontSize: 11, color: color, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 3),
+            if (count.isNotEmpty)
+              Text(count,
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+            if (amount.isNotEmpty)
+              Text('$amount YER',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------- Filters ----------
+  Widget _buildFilters(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'all', label: Text('الكل')),
+              ButtonSegment(value: 'has', label: Text('له رصيد')),
+              ButtonSegment(value: 'low', label: Text('منخفض')),
+              ButtonSegment(value: 'zero', label: Text('نفد')),
+            ],
+            selected: {_stockFilter},
+            onSelectionChanged: (s) {
+              setState(() => _stockFilter = s.first);
+              _loadProducts();
+            },
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 2,
+            child: DropdownButtonFormField<String>(
+              initialValue: _categoryFilter,
+              isDense: true,
+              decoration: const InputDecoration(
+                labelText: 'التصنيف',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              items: [
+                const DropdownMenuItem(value: '', child: Text('كل المجموعات')),
+                ..._categories.map((c) => DropdownMenuItem(
+                      value: c['slug'] as String,
+                      child: Text(c['name'] as String),
+                    )),
+              ],
+              onChanged: (v) {
+                setState(() => _categoryFilter = v ?? '');
+                _loadProducts();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 3,
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'بحث بالاسم أو SKU',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _search.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchDebounce?.cancel();
+                          _searchCtrl.clear();
+                          setState(() => _search = '');
+                          _loadProducts();
+                        },
+                      )
+                    : null,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+              onChanged: _onSearchChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- Tab 1: List ----------
+  Widget _buildListTab(ThemeData theme) {
+    if (_products.isEmpty) {
+      return const Center(child: Text('لا توجد أصناف بهذا الفلتر'));
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: DataTable(
+          headingRowHeight: 36,
+          dataRowMinHeight: 30,
+          dataRowMaxHeight: 36,
+          horizontalMargin: 12,
+          columnSpacing: 14,
+          columns: const [
+            DataColumn(label: Text('SKU', style: TextStyle(fontSize: 12))),
+            DataColumn(label: Text('الصنف', style: TextStyle(fontSize: 12))),
+            DataColumn(label: Text('التصنيف', style: TextStyle(fontSize: 12))),
+            DataColumn(label: Text('وحدة', style: TextStyle(fontSize: 12))),
+            DataColumn(
+                label: Text('رصيد', style: TextStyle(fontSize: 12)),
+                numeric: true),
+            DataColumn(
+                label: Text('تكلفة', style: TextStyle(fontSize: 12)),
+                numeric: true),
+            DataColumn(
+                label: Text('بيع', style: TextStyle(fontSize: 12)),
+                numeric: true),
+            DataColumn(
+                label: Text('قيمة', style: TextStyle(fontSize: 12)),
+                numeric: true),
+            DataColumn(label: Text('تفاصيل', style: TextStyle(fontSize: 12))),
+          ],
+          rows: _products.map((p) {
+            final qty = (p['stock_qty'] as num?)?.toDouble() ?? 0;
+            final cost = (p['standard_cost'] as num?)?.toDouble() ?? 0;
+            final value = qty * cost;
+            final color = _stockColor(qty);
+            final isZero = qty <= 0;
+            return DataRow(
+              color: isZero
+                  ? WidgetStatePropertyAll(Colors.red.withValues(alpha: 0.04))
+                  : null,
+              onSelectChanged: (_) => _selectProduct(p),
+              cells: [
+                DataCell(Text(
+                  (p['sku'] as String?) ?? '-',
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: Colors.grey),
+                )),
+                DataCell(ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  child: Text(
+                    (p['name'] as String?) ?? '-',
+                    style: const TextStyle(fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                )),
+                DataCell(Text(
+                  _catLabel(p['category_slug'] as String?),
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                )),
+                DataCell(Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      (p['default_unit'] as String?)?.trim().isNotEmpty == true
+                          ? (p['default_unit'] as String)
+                          : ((p['unit_id'] as String?) ?? '-'),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    if (((p['units_count'] as int?) ?? 0) > 1) ...[
+                      const SizedBox(width: 4),
+                      Icon(Icons.link,
+                          size: 13, color: Colors.blue.shade400),
+                    ],
+                  ],
+                )),
+                DataCell(Text(
+                  _fmtNum(qty),
+                  style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.bold, color: color),
+                )),
+                DataCell(
+                    Text(_fmtNum(cost), style: const TextStyle(fontSize: 11))),
+                DataCell(Text(_fmtNum((p['sale_price'] as num?) ?? 0),
+                    style: const TextStyle(fontSize: 11))),
+                DataCell(Text(_fmtNum(value),
+                    style:
+                        const TextStyle(fontSize: 11, color: Colors.grey))),
+                DataCell(Icon(Icons.arrow_forward_ios,
+                    size: 14, color: theme.colorScheme.primary)),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // ---------- Tab 2: Tree ----------
+  Widget _buildTreeTab(ThemeData theme) {
+    if (_products.isEmpty) {
+      return const Center(child: Text('لا توجد أصناف'));
+    }
+    // تجميع حسب التصنيف
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (final p in _products) {
+      final slug = (p['category_slug'] as String?) ?? '_none';
+      grouped.putIfAbsent(slug, () => []).add(p);
+    }
+    final slugs = grouped.keys.toList()
+      ..sort((a, b) =>
+          _catLabel(a).compareTo(_catLabel(b)));
+
+    return ListView.builder(
+      itemCount: slugs.length,
+      itemBuilder: (context, i) {
+        final slug = slugs[i];
+        final items = grouped[slug]!;
+        final totalQty = items.fold<double>(
+            0, (s, p) => s + ((p['stock_qty'] as num?)?.toDouble() ?? 0));
+        return ExpansionTile(
+          leading: CircleAvatar(
+            radius: 16,
+            backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.15),
+            child: Text('${items.length}',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary)),
+          ),
+          title: Text(_catLabel(slug),
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 14)),
+          subtitle: Text('إجمالي الرصيد: ${_fmtNum(totalQty)}',
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          children: items.map((p) {
+            final qty = (p['stock_qty'] as num?)?.toDouble() ?? 0;
+            return ListTile(
+              dense: true,
+              leading: Text(
+                (p['sku'] as String?) ?? '-',
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Colors.grey),
+              ),
+              title: Text((p['name'] as String?) ?? '-',
+                  style: const TextStyle(fontSize: 12)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_fmtNum(qty),
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: _stockColor(qty))),
+                  const SizedBox(width: 8),
+                  Text((p['unit_id'] as String?) ?? '',
+                      style: const TextStyle(
+                          fontSize: 11, color: Colors.grey)),
+                ],
+              ),
+              onTap: () => _selectProduct(p),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  // ---------- Tab 3: Movement ----------
+  Widget _buildMovementTab(ThemeData theme) {
+    if (_movements.isEmpty) {
+      return const Center(child: Text('لا توجد حركات مسجّلة'));
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: DataTable(
+          headingRowHeight: 36,
+          dataRowMinHeight: 30,
+          dataRowMaxHeight: 34,
+          columns: const [
+            DataColumn(label: Text('التاريخ', style: TextStyle(fontSize: 12))),
+            DataColumn(label: Text('الفاتورة', style: TextStyle(fontSize: 12))),
+            DataColumn(label: Text('الصنف', style: TextStyle(fontSize: 12))),
+            DataColumn(
+                label: Text('الكمية', style: TextStyle(fontSize: 12)),
+                numeric: true),
+            DataColumn(
+                label: Text('السعر', style: TextStyle(fontSize: 12)),
+                numeric: true),
+            DataColumn(
+                label: Text('الإجمالي', style: TextStyle(fontSize: 12)),
+                numeric: true),
+            DataColumn(label: Text('الدفع', style: TextStyle(fontSize: 12))),
+          ],
+          rows: _movements.map((m) {
+            final pay = (m['payment_method'] as String?) ?? 'cash';
+            final payLabel = pay == 'credit' ? 'آجل' : 'نقد';
+            final payColor = pay == 'credit' ? Colors.orange : Colors.green;
+            return DataRow(cells: [
+              DataCell(Text(_fmtDateTime(m['occurred_at'] as String?),
+                  style: const TextStyle(fontSize: 11))),
+              DataCell(Text((m['invoice_number'] as String?) ?? '-',
+                  style: const TextStyle(fontSize: 11))),
+              DataCell(ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 220),
+                child: Text(
+                  (m['product_name'] as String?) ?? '-',
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              )),
+              DataCell(Text(_fmtNum((m['quantity'] as num?) ?? 0),
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.bold))),
+              DataCell(Text(_fmtNum((m['unit_price'] as num?) ?? 0),
+                  style: const TextStyle(fontSize: 11))),
+              DataCell(Text(_fmtNum((m['subtotal'] as num?) ?? 0),
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.bold))),
+              DataCell(Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: payColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(payLabel,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: payColor,
+                        fontWeight: FontWeight.bold)),
+              )),
+            ]);
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // ---------- Tab 4: Details ----------
+  Widget _buildDetailsTab(ThemeData theme) {
+    final p = _selectedProduct;
+    if (p == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.touch_app, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            const Text('اختر صنفاً من القائمة أو الشجرة',
+                style: TextStyle(fontSize: 14, color: Colors.grey)),
+          ],
+        ),
+      );
+    }
+    final qty = (p['stock_qty'] as num?)?.toDouble() ?? 0;
+    final cost = (p['standard_cost'] as num?)?.toDouble() ?? 0;
+    final price = (p['sale_price'] as num?)?.toDouble() ?? 0;
+    final value = qty * cost;
+    final margin = price - cost;
+    final marginPct = cost > 0 ? (margin / cost * 100) : 0;
+    final color = _stockColor(qty);
+
+    // حركات هذا الصنف
+    final myMoves =
+        _movements.where((m) => m['product_id'] == p['id']).take(20).toList();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (p['name'] as String?) ?? '-',
+                              style: const TextStyle(
+                                  fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'SKU: ${(p['sku'] as String?) ?? '-'}',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontFamily: 'monospace',
+                                  color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Chip(
+                        label: Text(
+                          qty <= 0
+                              ? 'نفد'
+                              : qty < kLowThreshold
+                                  ? 'منخفض'
+                                  : 'متوفر',
+                          style: TextStyle(
+                              color: color, fontWeight: FontWeight.bold),
+                        ),
+                        backgroundColor: color.withValues(alpha: 0.15),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 24),
+                  Row(
+                    children: [
+                      _kv('التصنيف', _catLabel(p['category_slug'] as String?)),
+                      _kv('الوحدة', (p['unit_id'] as String?) ?? '-'),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _kvNum('الرصيد', qty, color),
+                      _kvNum('التكلفة', cost, null),
+                      _kvNum('سعر البيع', price, null),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _kvNum('قيمة المخزون', value, null),
+                      _kvNum('هامش الربح', margin,
+                          margin > 0 ? Colors.green : Colors.red),
+                      _kvNum('نسبة الهامش %', marginPct, null),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // ── وحدات الصنف (v8.3.7a) ──
+          if (_productUnits.isNotEmpty) ...[
+            Text('📦 وحدات الصنف',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: DataTable(
+                  headingRowHeight: 32,
+                  dataRowMinHeight: 28,
+                  dataRowMaxHeight: 32,
+                  columnSpacing: 14,
+                  horizontalMargin: 8,
+                  columns: const [
+                    DataColumn(
+                        label: Text('#', style: TextStyle(fontSize: 11))),
+                    DataColumn(
+                        label: Text('الوحدة',
+                            style: TextStyle(fontSize: 11))),
+                    DataColumn(
+                        label: Text('العبوة',
+                            style: TextStyle(fontSize: 11)),
+                        numeric: true),
+                    DataColumn(
+                        label: Text('الحالة',
+                            style: TextStyle(fontSize: 11))),
+                  ],
+                  rows: _productUnits.asMap().entries.map((e) {
+                    final i = e.key;
+                    final u = e.value;
+                    final isDefault = (u['is_default'] as int? ?? 0) == 1;
+                    return DataRow(cells: [
+                      DataCell(Text('${i + 1}',
+                          style: const TextStyle(fontSize: 11))),
+                      DataCell(Text(
+                        (u['unit_code'] as String?) ?? '-',
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold),
+                      )),
+                      DataCell(Text(
+                        _fmtNum((u['conversion_factor'] as num?) ?? 0),
+                        style: const TextStyle(fontSize: 11),
+                      )),
+                      DataCell(isDefault
+                          ? const Text('★ افتراضية',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold))
+                          : const Text('',
+                              style: TextStyle(fontSize: 10))),
+                    ]);
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          // Movements
+          Text('آخر حركات هذا الصنف',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          if (myMoves.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                  child: Text('لا توجد حركات مسجّلة لهذا الصنف',
+                      style: TextStyle(color: Colors.grey))),
+            )
+          else
+            ...myMoves.map((m) => Card(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  child: ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.receipt_long, size: 20),
+                    title: Text(
+                      (m['product_name'] as String?) ?? '-',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    subtitle: Text(
+                      '${(m['invoice_number'] as String?) ?? '-'} · ${_fmtDateTime(m['occurred_at'] as String?)}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    trailing: Text(
+                      '${_fmtNum((m['quantity'] as num?) ?? 0)} × ${_fmtNum((m['unit_price'] as num?) ?? 0)}',
+                      style: const TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String k, String v) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(k,
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 2),
+          Text(v,
+              style: const TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _kvNum(String k, num v, Color? color) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(k,
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 2),
+          Text(_fmtNum(v),
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: color ?? Colors.black87)),
+        ],
+      ),
+    );
+  }
+}

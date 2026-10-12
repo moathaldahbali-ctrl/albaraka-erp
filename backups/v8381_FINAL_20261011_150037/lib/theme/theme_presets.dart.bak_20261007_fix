@@ -1,0 +1,169 @@
+// lib/theme/theme_presets.dart
+// نماذج الثيمات — 6 ثيمات × (Light + Dark)
+// آخر تحديث: 2026-10-07
+
+import 'package:flutter/material.dart';
+
+/// نموذج ثيم واحد — له نسختان (Light / Dark)
+class ThemePreset {
+  final String id;
+  final String nameAr;
+  final String emoji;
+
+  // Light
+  final Color lightPrimary;
+  final Color lightSecondary;
+  final Color lightHeaderRow;
+
+  // Dark
+  final Color darkPrimary;
+  final Color darkSecondary;
+  final Color darkHeaderRow;
+
+  const ThemePreset({
+    required this.id,
+    required this.nameAr,
+    required this.emoji,
+    required this.lightPrimary,
+    required this.lightSecondary,
+    required this.lightHeaderRow,
+    required this.darkPrimary,
+    required this.darkSecondary,
+    required this.darkHeaderRow,
+  });
+
+  Color primaryFor(Brightness b) =>
+      b == Brightness.dark ? darkPrimary : lightPrimary;
+
+  Color secondaryFor(Brightness b) =>
+      b == Brightness.dark ? darkSecondary : lightSecondary;
+
+  Color headerRowFor(Brightness b) =>
+      b == Brightness.dark ? darkHeaderRow : lightHeaderRow;
+
+  /// لون الخلفية العام
+  Color backgroundFor(Brightness b) =>
+      b == Brightness.dark ? const Color(0xFF121212) : const Color(0xFFFFFFFF);
+
+  /// لون سطح البطاقات
+  Color surfaceFor(Brightness b) =>
+      b == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFFFFFFF);
+
+  /// لون الحدود
+  Color borderFor(Brightness b) =>
+      b == Brightness.dark ? const Color(0xFF424242) : const Color(0xFFBDBDBD);
+
+  /// لون النص الأساسي
+  Color textPrimaryFor(Brightness b) =>
+      b == Brightness.dark ? const Color(0xFFEEEEEE) : const Color(0xFF212121);
+
+  /// لون النص الثانوي
+  Color textSecondaryFor(Brightness b) =>
+      b == Brightness.dark ? const Color(0xFF9E9E9E) : const Color(0xFF757575);
+}
+
+// ═══════════════════════════════════════════════════════════
+// الثيمات الستة — كل واحد له Light + Dark
+// ═══════════════════════════════════════════════════════════
+
+const List<ThemePreset> kThemePresets = [
+  // ─── 1. 🟠 ذهبي (البركة) — الافتراضي ───
+  ThemePreset(
+    id: 'baraka_gold',
+    nameAr: 'ذهبي البركة',
+    emoji: '🟠',
+    lightPrimary: Color(0xFFF39C12),
+    lightSecondary: Color(0xFFE67E22),
+    lightHeaderRow: Color(0xFFFFE0B2),
+    darkPrimary: Color(0xFFF39C12),
+    darkSecondary: Color(0xFFE67E22),
+    darkHeaderRow: Color(0xFF5D4037),
+  ),
+
+  // ─── 2. 🟢 أخضر زمردي ───
+  ThemePreset(
+    id: 'emerald',
+    nameAr: 'أخضر زمردي',
+    emoji: '🟢',
+    lightPrimary: Color(0xFF1B5E20),
+    lightSecondary: Color(0xFFFFB300),
+    lightHeaderRow: Color(0xFFC8E6C9),
+    darkPrimary: Color(0xFF2E7D32),
+    darkSecondary: Color(0xFFFFB300),
+    darkHeaderRow: Color(0xFF1B5E20),
+  ),
+
+  // ─── 3. 🔵 أزرق ملكي ───
+  ThemePreset(
+    id: 'royal_blue',
+    nameAr: 'أزرق ملكي',
+    emoji: '🔵',
+    lightPrimary: Color(0xFF1E3A8A),
+    lightSecondary: Color(0xFFF39C12),
+    lightHeaderRow: Color(0xFFBBDEFB),
+    darkPrimary: Color(0xFF3F51B5),
+    darkSecondary: Color(0xFFF39C12),
+    darkHeaderRow: Color(0xFF1A237E),
+  ),
+
+  // ─── 4. ⚫ رمادي داكن ───
+  ThemePreset(
+    id: 'charcoal',
+    nameAr: 'رمادي أنيق',
+    emoji: '⚫',
+    lightPrimary: Color(0xFF37474F),
+    lightSecondary: Color(0xFFFFB300),
+    lightHeaderRow: Color(0xFFCFD8DC),
+    darkPrimary: Color(0xFF546E7A),
+    darkSecondary: Color(0xFFFFB300),
+    darkHeaderRow: Color(0xFF263238),
+  ),
+
+  // ─── 5. 🟣 بنفسجي ملكي ───
+  ThemePreset(
+    id: 'royal_purple',
+    nameAr: 'بنفسجي ملكي',
+    emoji: '🟣',
+    lightPrimary: Color(0xFF6A1B9A),
+    lightSecondary: Color(0xFFFFB300),
+    lightHeaderRow: Color(0xFFE1BEE7),
+    darkPrimary: Color(0xFF8E24AA),
+    darkSecondary: Color(0xFFFFB300),
+    darkHeaderRow: Color(0xFF4A148C),
+  ),
+
+  // ─── 6. 🔷 سماوي ───
+  ThemePreset(
+    id: 'sky',
+    nameAr: 'سماوي',
+    emoji: '🔷',
+    lightPrimary: Color(0xFF0277BD),
+    lightSecondary: Color(0xFFFFB300),
+    lightHeaderRow: Color(0xFFB3E5FC),
+    darkPrimary: Color(0xFF039BE5),
+    darkSecondary: Color(0xFFFFB300),
+    darkHeaderRow: Color(0xFF01579B),
+  ),
+];
+
+/// يُرجِع preset بالـ id، أو الأول افتراضياً
+ThemePreset presetById(String? id) {
+  if (id == null) return kThemePresets.first;
+  return kThemePresets.firstWhere(
+    (p) => p.id == id,
+    orElse: () => kThemePresets.first,
+    /// يُنشئ preset ديناميكياً من لون أساسي واحد
+/// (يُشتق منه كل الألوان: Secondary، HeaderRow، إلخ)
+ThemePreset makeCustomPreset(Color seed) {
+  return ThemePreset(
+    id: 'custom',
+    nameAr: 'مخصص',
+    emoji: '🎨',
+    lightPrimary: seed,
+    lightSecondary: Color.lerp(seed, Colors.black, 0.2)!,
+    lightHeaderRow: Color.lerp(seed, Colors.white, 0.7)!,
+    darkPrimary: seed,
+    darkSecondary: Color.lerp(seed, Colors.white, 0.15)!,
+    darkHeaderRow: Color.lerp(seed, Colors.black, 0.5)!,
+  );
+}

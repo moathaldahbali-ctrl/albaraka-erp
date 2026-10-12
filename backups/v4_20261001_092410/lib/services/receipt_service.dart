@@ -1,0 +1,293 @@
+﻿import 'dart:io';
+import 'dart:typed_data';
+import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
+class ReceiptLine {
+  final String productName;
+  final String sku;
+  final String unitCode;
+  final double quantity;
+  final double unitPrice;
+  final double subtotal;
+
+  ReceiptLine({
+    required this.productName,
+    required this.sku,
+    required this.unitCode,
+    required this.quantity,
+    required this.unitPrice,
+    required this.subtotal,
+  });
+}
+
+class ReceiptData {
+  final String invoiceNumber;
+  final DateTime occurredAt;
+  final String paymentMethod;
+  final String? customerName;
+  final double total;
+  final List<ReceiptLine> lines;
+
+  ReceiptData({
+    required this.invoiceNumber,
+    required this.occurredAt,
+    required this.paymentMethod,
+    required this.customerName,
+    required this.total,
+    required this.lines,
+  });
+}
+
+class ReceiptService {
+  static const String _shopName = 'بقالة وبهارات البركة';
+  static const String _shopAddressLine1 = 'صنعاء - ش بيحان المتفرع من';
+  static const String _shopAddressLine2 = 'ش 22 مايو';
+  static const String _shopPhone = '772025928';
+  static const String _currency = 'YER';
+
+  static Future<Uint8List> generatePdf(ReceiptData data) async {
+    final font = await PdfGoogleFonts.cairoRegular();
+    final fontBold = await PdfGoogleFonts.cairoBold();
+
+    final doc = pw.Document();
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a5,
+        textDirection: pw.TextDirection.rtl,
+        theme: pw.ThemeData.withFont(base: font, bold: fontBold),
+        build: (ctx) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              pw.Center(
+                child: pw.Text(
+                  _shopName,
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              pw.Center(
+                child: pw.Text(_shopAddressLine1,
+                    style: const pw.TextStyle(fontSize: 10)),
+              ),
+              pw.Center(
+                child: pw.Text(_shopAddressLine2,
+                    style: const pw.TextStyle(fontSize: 10)),
+              ),
+              pw.SizedBox(height: 2),
+              pw.Center(
+                child: pw.Text('هاتف: ' + _shopPhone,
+                    style: const pw.TextStyle(fontSize: 10)),
+              ),
+              pw.SizedBox(height: 8),
+              pw.Divider(thickness: 0.7),
+              pw.SizedBox(height: 6),
+
+              // ===== معلومات الفاتورة (RTL بحت) =====
+              _infoLine(
+                'التاريخ:',
+                DateFormat('dd/MM/yyyy HH:mm').format(data.occurredAt),
+              ),
+              pw.SizedBox(height: 4),
+              _infoLine('الفاتورة:', data.invoiceNumber),
+              pw.SizedBox(height: 4),
+              _infoLine('طريقة الدفع:',
+                  data.paymentMethod == 'cash' ? 'نقد' : 'أجل'),
+              if (data.customerName != null &&
+                  data.customerName!.isNotEmpty) ...[
+                pw.SizedBox(height: 4),
+                _infoLine('العميل:', data.customerName!),
+              ],
+
+              pw.SizedBox(height: 6),
+              pw.Divider(thickness: 0.7),
+              pw.SizedBox(height: 6),
+
+              _buildLinesTable(data.lines),
+
+              pw.SizedBox(height: 8),
+              pw.Divider(thickness: 0.7),
+              pw.SizedBox(height: 6),
+
+              // ===== الإجمالي (RTL) =====
+              pw.Align(
+                alignment: pw.Alignment.centerRight,
+                child: pw.RichText(
+                  textDirection: pw.TextDirection.rtl,
+                  text: pw.TextSpan(
+                    children: [
+                      pw.TextSpan(
+                        text: 'الإجمالي: ',
+                        style: pw.TextStyle(
+                          fontSize: 15,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.TextSpan(
+                        text: _fmtNum(data.total) + ' ' + _currency,
+                        style: pw.TextStyle(
+                          fontSize: 15,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              pw.SizedBox(height: 10),
+              pw.Divider(thickness: 0.7),
+              pw.SizedBox(height: 8),
+
+              pw.Center(
+                child: pw.Text(
+                  'شكراً لتسوقكم معنا',
+                  style: pw.TextStyle(
+                    fontSize: 12,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              pw.Center(
+                child: pw.Text(_shopName,
+                    style: const pw.TextStyle(fontSize: 10)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    return doc.save();
+  }
+
+  /// سطر معلومات RTL: التسمية (bold) ثم القيمة، كلها من الحافة اليمنى.
+  static pw.Widget _infoLine(String label, String value) {
+    return pw.Align(
+      alignment: pw.Alignment.centerRight,
+      child: pw.RichText(
+        textDirection: pw.TextDirection.rtl,
+        text: pw.TextSpan(
+          children: [
+            pw.TextSpan(
+              text: label + ' ',
+              style: pw.TextStyle(
+                  fontSize: 11, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.TextSpan(
+              text: value,
+              style: const pw.TextStyle(fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static pw.Widget _buildLinesTable(List<ReceiptLine> lines) {
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+      columnWidths: {
+        // ترتيب فيزيائي: من اليسار إلى اليمين في الكود
+        // لأن RTL يُظهرها معكوسة.
+        0: const pw.FlexColumnWidth(2), // الإجمالي (يظهر يسار)
+        1: const pw.FlexColumnWidth(2), // السعر
+        2: const pw.FlexColumnWidth(1.5), // الوحدة
+        3: const pw.FlexColumnWidth(1.5), // الكمية
+        4: const pw.FlexColumnWidth(4), // الصنف (يظهر يمين)
+      },
+      children: [
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+          children: [
+            _cell('الإجمالي', bold: true),
+            _cell('السعر', bold: true),
+            _cell('الوحدة', bold: true),
+            _cell('الكمية', bold: true),
+            _cell('الصنف', bold: true),
+          ],
+        ),
+        ...lines.map(
+          (l) => pw.TableRow(
+            children: [
+              _cell(_fmtNum(l.subtotal)),
+              _cell(_fmtNum(l.unitPrice)),
+              _cell(l.unitCode),
+              _cell(_fmtNum(l.quantity)),
+              _cell(l.productName, align: pw.TextAlign.right),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget _cell(
+    String text, {
+    bool bold = false,
+    pw.TextAlign align = pw.TextAlign.center,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(4),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontSize: 10,
+          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+        ),
+        textAlign: align,
+      ),
+    );
+  }
+
+  static String _fmtNum(double v) {
+    if (v == v.roundToDouble()) {
+      final s = v.toInt().toString();
+      final buf = StringBuffer();
+      for (int i = 0; i < s.length; i++) {
+        if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+        buf.write(s[i]);
+      }
+      return buf.toString();
+    }
+    return v.toStringAsFixed(2);
+  }
+
+  static Future<String> savePdfToDisk(
+      Uint8List bytes, String invoiceNumber) async {
+    final dir = Directory(r'D:\albaraka\data\receipts');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    final safeName = invoiceNumber.replaceAll('/', '_').replaceAll(':', '_');
+    final fileName = safeName + '.pdf';
+    final filePath = p.join(dir.path, fileName);
+    await File(filePath).writeAsBytes(bytes);
+    return filePath;
+  }
+
+  static Future<void> previewPdf(
+      Uint8List bytes, String invoiceNumber) async {
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      name: 'فاتورة ' + invoiceNumber,
+    );
+  }
+
+  static Future<void> printPdf(
+      Uint8List bytes, String invoiceNumber) async {
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      name: 'فاتورة ' + invoiceNumber,
+    );
+  }
+}

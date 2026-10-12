@@ -1,0 +1,605 @@
+import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:intl/intl.dart';
+
+import '../db/local_db.dart';
+import '../theme/theme_provider.dart';
+import '../widgets/theme_picker_dialog.dart';
+import '../widgets/close_session_dialog.dart';
+import '../sync/sync_manager.dart';
+import 'sale_screen.dart';
+
+/// ---------------------------------------------------------------------------
+/// HomePage — v8.1/6 (Betasys-style)
+///
+/// البنية:
+///   ┌── Top Toolbar (7 nav + 4 actions) ──────────────────────────┐
+///   ├── Gold Divider ──────────────────────────────────────────────┤
+///   │  ┌── Sidebar (right) ──┐  ┌── Center Area ─────────────┐   │
+///   │  │ فاتورة جديدة         │  │  [Logo] اسم البقالة        │   │
+///   │  │ مرتجع مبيعات         │  │  بطاقات: عملات/معلّقة/…    │   │
+///   │  │ قبض نقدية …          │  │  قائمة العملات              │   │
+///   │  └──────────────────────┘  └──────────────────────────────┘   │
+///   ├── Status Bar (user · branch · online · date · version) ─────┤
+///   └── FAB: فاتورة جديدة ────────────────────────────────────────┘
+/// ---------------------------------------------------------------------------
+class HomePage extends StatefulWidget {
+  final VoidCallback? onLogout;
+  const HomePage({Key? key, this.onLogout}) : super(key: key);
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  // هوية بصرية (من الشعار) — تُستخدم فقط للأيقونات الجمالية والشعار.
+  // الألوان التفاعلية تأتي من الثيم.
+  static const Color kBrandGreen = Color(0xFF0D4722);
+  static const Color kBrandGold  = Color(0xFFD4AF37);
+
+  List<Map<String, dynamic>> _currencies = const [];
+  int    _pendingCount = 0;
+  String _cashierName  = '...';
+  String _branchName   = 'الفرع الرئيسي';
+  bool   _online       = true;
+  bool   _syncing      = false;
+  late DateTime _now   = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await _checkConnectivity();
+    await _loadCurrencies();
+    await _loadPendingCount();
+    await _loadCashier();
+    if (mounted) setState(() {});
+  }
+
+  // ---------------- Data ----------------
+
+  Future<void> _checkConnectivity() async {
+    try {
+      final r = await Connectivity().checkConnectivity();
+      if (mounted) setState(() => _online = r != ConnectivityResult.none);
+    } catch (_) {
+      if (mounted) setState(() => _online = false);
+    }
+  }
+
+  Future<void> _loadCurrencies() async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      final rows = await db.query('currencies_local');
+      if (mounted) {
+        setState(() => _currencies = rows.map((e) => Map<String, dynamic>.from(e)).toList());
+      }
+    } catch (_) {
+      if (mounted) setState(() => _currencies = const []);
+    }
+  }
+
+  Future<void> _loadPendingCount() async {
+    try {
+      final db = await LocalDatabase.instance.database;
+      final r = await db.rawQuery(
+        "SELECT COUNT(*) AS c FROM sales_local WHERE status = 'pending'",
+      );
+      if (mounted) setState(() => _pendingCount = (r.first['c'] as int?) ?? 0);
+    } catch (_) {
+      if (mounted) setState(() => _pendingCount = 0);
+    }
+  }
+
+  Future<void> _loadCashier() async {
+    try {
+      // TODO: تأكد من اسم الدالة في LocalDatabase
+      // قد تكون: getCurrentDisplayName() أو getCurrentUser()?.displayName
+      final name = await LocalDatabase.instance.getCurrentDisplayName();
+      if (name != null && name.isNotEmpty && mounted) {
+        setState(() => _cashierName = name);
+      }
+    } catch (_) {/* تجاهل */}
+  }
+
+  // ---------------- Actions ----------------
+
+  Future<void> _onSync() async {
+    if (_syncing) return;
+    setState(() => _syncing = true);
+    try {
+      // TODO: تأكد من اسم الدالة. من التقارير: syncPendingSessions + syncPendingSales
+      await SyncManager.instance.syncPendingSessions();
+      await SyncManager.instance.syncPendingSales();
+      await _loadPendingCount();
+      _snack('تمت المزامنة بنجاح', Colors.green);
+    } catch (e) {
+      _snack('تعذّرت المزامنة: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  Future<void> _onTheme() async {
+    await showDialog(
+      context: context,
+      builder: (_) => const ThemePickerDialog(),
+    );
+  }
+
+  Future<void> _onCloseSession() async {
+    await showDialog(
+      context: context,
+      builder: (_) => const CloseSessionDialog(),
+    );
+    // بعد الإغلاق، الخروج لشاشة الدخول
+    if (mounted) widget.onLogout?.call();
+  }
+
+  Future<void> _onLogout() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تسجيل الخروج'),
+        content: const Text('هل تريد تسجيل الخروج؟\n(الوردية ستبقى مفتوحة)'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true),  child: const Text('خروج')),
+        ],
+      ),
+    );
+    if (ok == true) widget.onLogout?.call();
+  }
+
+  Future<void> _onNewInvoice() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SaleScreen()),
+    );
+    await _loadPendingCount();
+  }
+
+  void _snack(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: color),
+    );
+  }
+
+  void _comingSoon(String label) =>
+      _snack('«$label» قريباً في المرحلة القادمة', Colors.blueGrey);
+
+  // ---------------- Build ----------------
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // نستمع إلى revision لإعادة البناء عند تغيير الثيم
+    return ValueListenableBuilder<int>(
+      valueListenable: ThemeProvider.revision,
+      builder: (_, __, ___) {
+        return Scaffold(
+          backgroundColor: theme.scaffoldBackgroundColor,
+          body: Column(
+            children: [
+              _buildTopToolbar(theme),
+              _buildGoldDivider(),
+              Expanded(
+                child: Row(
+                  children: [
+                    _buildSidebar(theme),
+                    _buildVDivider(theme),
+                    Expanded(child: _buildCenter(theme)),
+                  ],
+                ),
+              ),
+              _buildStatusBar(theme),
+            ],
+          ),
+          floatingActionButton: _buildNewInvoiceFab(theme),
+        );
+      },
+    );
+  }
+
+  // ---------- 1) Top Toolbar ----------
+
+  Widget _buildTopToolbar(ThemeData theme) {
+    return Container(
+      height: 78,
+      color: theme.colorScheme.surface,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          // شعار ملون صغير
+          _logoCircle(theme, size: 56),
+          const SizedBox(width: 8),
+          Text(
+            'البركة',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 16),
+
+          // التنقل الرئيسي
+          _navBtn(theme, Icons.shopping_cart,           'المبيعات',  _onNewInvoice),
+          _navBtn(theme, Icons.shopping_basket,         'المشتريات', () => _comingSoon('المشتريات')),
+          _navBtn(theme, Icons.account_balance_wallet,  'الصندوق',   () => _comingSoon('الصندوق')),
+          _navBtn(theme, Icons.inventory,               'المخازن',   () => _comingSoon('المخازن')),
+          _navBtn(theme, Icons.bar_chart,               'التقارير',  () => _comingSoon('التقارير')),
+          _navBtn(theme, Icons.settings,                'الإعدادات', () => _comingSoon('الإعدادات')),
+
+          const Spacer(),
+
+          // Actions (الأربع الحالية)
+          _iconBtn(theme, Icons.palette_outlined, 'الثيمات',       _onTheme),
+          _iconBtn(theme, Icons.sync,             'مزامنة',         _onSync,
+              spinning: _syncing, badge: _pendingCount > 0 ? _pendingCount : null),
+          _iconBtn(theme, Icons.lock_outline,     'إغلاق الوردية', _onCloseSession),
+          _iconBtn(theme, Icons.logout,           'خروج',          _onLogout, color: Colors.red),
+        ],
+      ),
+    );
+  }
+
+  Widget _navBtn(ThemeData theme, IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 24, color: theme.colorScheme.primary),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurface)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _iconBtn(
+    ThemeData theme,
+    IconData icon,
+    String tip,
+    VoidCallback onTap, {
+    bool spinning = false,
+    int? badge,
+    Color? color,
+  }) {
+    return Tooltip(
+      message: tip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              spinning
+                  ? const SizedBox(
+                      width: 24, height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(icon, size: 24, color: color ?? theme.colorScheme.primary),
+              if (badge != null)
+                Positioned(
+                  right: -6, top: -6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('$badge',
+                        style: const TextStyle(color: Colors.white, fontSize: 10)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGoldDivider() => Container(height: 2, color: kBrandGold);
+
+  // ---------- 2) Sidebar ----------
+
+  Widget _buildSidebar(ThemeData theme) {
+    final items = <_SbItem>[
+      _SbItem('فاتورة جديدة',  Icons.add_shopping_cart,     _onNewInvoice, enabled: true),
+      _SbItem('مرتجع مبيعات',  Icons.remove_shopping_cart,  () => _comingSoon('المرتجع')),
+      _SbItem('قبض نقدية',     Icons.monetization_on,       () => _comingSoon('القبض')),
+      _SbItem('صرف نقدية',     Icons.money_off,             () => _comingSoon('الصرف')),
+      _SbItem('إشعار بنكي',    Icons.account_balance,       () => _comingSoon('الإشعار')),
+      _SbItem('فاتورة مشتريات', Icons.shopping_bag,          () => _comingSoon('المشتريات')),
+      _SbItem('توريد مخزني',   Icons.archive,               () => _comingSoon('التوريد')),
+      _SbItem('صرف مخزني',     Icons.unarchive,             () => _comingSoon('الصرف المخزني')),
+    ];
+
+    return Container(
+      width: 112,
+      color: theme.colorScheme.surface,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: items.length,
+        itemBuilder: (_, i) => _sidebarItem(theme, items[i]),
+      ),
+    );
+  }
+
+  Widget _sidebarItem(ThemeData theme, _SbItem it) {
+    final enabled = it.enabled;
+    return InkWell(
+      onTap: enabled ? it.onTap : null,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          border: Border.all(color: theme.dividerColor.withOpacity(0.4)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          children: [
+            Icon(it.icon, size: 28,
+                color: enabled ? kBrandGold : theme.disabledColor),
+            const SizedBox(height: 6),
+            Text(
+              it.label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: enabled ? theme.colorScheme.primary : theme.disabledColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------- 3) Center Area ----------
+
+  Widget _buildCenter(ThemeData theme) {
+    return Stack(
+      children: [
+        // دوائر زخرفية
+        Positioned(
+          top: -120, left: -120,
+          child: Container(
+            width: 360, height: 360,
+            decoration: BoxDecoration(
+              color: kBrandGreen.withOpacity(0.05),
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: -150, right: -80,
+          child: Container(
+            width: 420, height: 420,
+            decoration: BoxDecoration(
+              color: kBrandGold.withOpacity(0.06),
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+
+        // المحتوى
+        SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              _logoCircle(theme, size: 150, ring: true),
+              const SizedBox(height: 16),
+              Text(
+                'بقالة وبهارات البركة',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(width: 220, height: 3, color: kBrandGold),
+              const SizedBox(height: 10),
+              Text('نظام نقاط البيع وإدارة المخزون',
+                  style: TextStyle(fontSize: 16, color: theme.hintColor)),
+              const SizedBox(height: 28),
+
+              // بطاقات معلومات
+              Wrap(
+                spacing: 16, runSpacing: 16,
+                alignment: WrapAlignment.center,
+                children: [
+                  _infoCard(theme, 'العملات',           '${_currencies.length}'),
+                  _infoCard(theme, 'فواتير معلّقة',      '$_pendingCount',
+                      color: _pendingCount > 0 ? Colors.orange : null),
+                  _infoCard(theme, 'حالة الاتصال',
+                      _online ? 'متصل' : 'أوفلاين',
+                      color: _online ? Colors.green : Colors.orange),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+              if (_currencies.isNotEmpty) _currenciesCard(theme),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _infoCard(ThemeData theme, String label, String value, {Color? color}) {
+    return Container(
+      width: 160,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: theme.hintColor)),
+          const SizedBox(height: 6),
+          Text(value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color ?? theme.colorScheme.primary,
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _currenciesCard(ThemeData theme) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 640),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.monetization_on, color: kBrandGold),
+              const SizedBox(width: 8),
+              Text('العملات المتاحة',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary,
+                  )),
+            ],
+          ),
+          const Divider(height: 20),
+          ..._currencies.map((c) {
+            final code = c['code']?.toString() ?? '';
+            final name = c['name']?.toString() ?? '';
+            final rate = c['exchange_rate']?.toString() ?? '';
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: kBrandGreen.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(code,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: kBrandGreen,
+                          fontSize: 12,
+                        )),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(name)),
+                  Text(rate,
+                      style: TextStyle(color: theme.hintColor, fontSize: 12)),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ---------- 4) Status Bar ----------
+
+  Widget _buildStatusBar(ThemeData theme) {
+    final df = DateFormat('yyyy-MM-dd  HH:mm');
+    return Container(
+      height: 34,
+      color: theme.colorScheme.surfaceVariant.withOpacity(0.4),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Icon(Icons.person, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 4),
+          Text(_cashierName, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 16),
+          Icon(Icons.store, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 4),
+          Text(_branchName, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 16),
+          Icon(Icons.circle, size: 10,
+              color: _online ? Colors.green : Colors.orange),
+          const SizedBox(width: 4),
+          Text(_online ? 'متصل' : 'أوفلاين',
+              style: const TextStyle(fontSize: 12)),
+          const Spacer(),
+          Text(df.format(_now), style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 16),
+          const Text('v8.1', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  // ---------- Helpers ----------
+
+  Widget _logoCircle(ThemeData theme, {required double size, bool ring = false}) {
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: ring ? Border.all(color: kBrandGold, width: 3) : null,
+        boxShadow: ring
+            ? [BoxShadow(color: Colors.black.withOpacity(0.08),
+                blurRadius: 16, offset: const Offset(0, 6))]
+            : null,
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/logo_color.png',
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) =>
+              Icon(Icons.storefront, size: size * 0.5, color: kBrandGreen),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVDivider(ThemeData theme) =>
+      Container(width: 1, color: theme.dividerColor.withOpacity(0.4));
+
+  Widget _buildNewInvoiceFab(ThemeData theme) {
+    return FloatingActionButton.extended(
+      onPressed: _onNewInvoice,
+      backgroundColor: kBrandGreen,
+      foregroundColor: Colors.white,
+      icon: const Icon(Icons.add_shopping_cart),
+      label: const Text('فاتورة جديدة'),
+    );
+  }
+}
+
+class _SbItem {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool enabled;
+  _SbItem(this.label, this.icon, this.onTap, {this.enabled = false});
+}

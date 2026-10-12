@@ -1,0 +1,73 @@
+import 'package:flutter/foundation.dart';
+import 'package:graphql_flutter/graphql_flutter.dart';
+import '../db/local_db.dart';
+
+/// مزامنة صلاحيات المستخدمين الفردية (Standalone Function)
+Future<int> syncUserPermissionsOverride(GraphQLClient client) async {
+  final db = await LocalDatabase.instance.database;
+
+  final pending = await db.query(
+    'user_permissions_override_local',
+    where: 'synced_at IS NULL',
+    limit: 100,
+  );
+
+  if (pending.isEmpty) {
+    debugPrint('No pending user permissions to sync');
+    return 0;
+  }
+
+  int syncedCount = 0;
+
+  for (final row in pending) {
+    try {
+      final result = await client.mutate(
+        MutationOptions(
+          document: gql(r"""
+            mutation UpsertUserPermission($obj: user_permissions_override_insert_input!) {
+              insert_user_permissions_override_one(
+                object: $obj,
+                on_conflict: {
+                  constraint: user_permissions_override_pkey,
+                  update_columns: [is_granted, granted_by]
+                }
+              ) { user_id permission_id }
+            }
+          """),
+          variables: {
+            'obj': {
+              'user_id': row['user_id'],
+              'permission_id': row['permission_key'],
+              'is_granted': row['is_granted'] == 1,
+              'granted_by': row['granted_by'],
+              'granted_at':
+                  row['granted_at'] ?? DateTime.now().toIso8601String(),
+            }
+          },
+        ),
+      );
+
+      // CRITICAL: Check for errors in GraphQL response
+      if (result.hasException) {
+        final error = result.exception.toString();
+        debugPrint('GraphQL error on ${row['permission_key']}: $error');
+        continue; // DO NOT update synced_at
+      }
+
+      // Only update synced_at on real success
+      await db.update(
+        'user_permissions_override_local',
+        {'synced_at': DateTime.now().toIso8601String()},
+        where: 'user_id = ? AND permission_key = ?',
+        whereArgs: [row['user_id'], row['permission_key']],
+      );
+      syncedCount++;
+      debugPrint('Synced: ${row['permission_key']}');
+    } catch (e) {
+      debugPrint('Failed to sync ${row['permission_key']}: $e');
+    }
+  }
+
+  debugPrint('Synced $syncedCount user permissions');
+  return syncedCount;
+}
