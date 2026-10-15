@@ -34,6 +34,20 @@ class _UsersScreenState extends State<UsersScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
+  /// v8.3.10 — safe display name (handles null + empty string)
+  String _displayName(UserModel u) {
+    final dn = u.displayName?.trim() ?? '';
+    if (dn.isNotEmpty) return dn;
+    return u.username;
+  }
+
+  /// v8.3.10 — safe initial (handles null + empty + multi-byte)
+  String _initial(UserModel u) {
+    final s = _displayName(u);
+    if (s.isEmpty) return '?';
+    return s.characters.first;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -68,12 +82,11 @@ class _UsersScreenState extends State<UsersScreen> {
                             backgroundColor:
                                 u.isActive ? Colors.green : Colors.grey,
                             child: Text(
-                              u.displayName?.substring(0, 1) ??
-                                  u.username.substring(0, 1),
+                              _initial(u),
                               style: const TextStyle(color: Colors.white),
                             ),
                           ),
-                          title: Text(u.displayName ?? u.username),
+                          title: Text(_displayName(u)),
                           subtitle: Text('${u.roleDisplay} · ${u.username}'),
                           trailing: IconButton(
                             icon: const Icon(Icons.edit, size: 20),
