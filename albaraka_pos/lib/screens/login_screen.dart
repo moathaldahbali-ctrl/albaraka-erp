@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../db/local_db.dart';
+import '../core/app_constants.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -250,9 +251,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ],
                   const SizedBox(height: 24),
-                  const Text(
-                    'v9.4.6 • 2026-10-10',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  Text(
+                    '${AppConstants.kVersion} • ${AppConstants.kVersionDate}',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                 ],
               ),

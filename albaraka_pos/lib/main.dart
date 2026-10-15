@@ -30,6 +30,7 @@ import 'sync/sync_manager.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_provider.dart';
 import 'core/app_initializer.dart';
+import 'core/app_constants.dart';
 import 'core/bootstrap/bootstrap_result.dart';
 import 'screens/splash_screen.dart';
 Future<void> main() async {
@@ -271,7 +272,7 @@ class _HomePageState extends State<HomePage> {
   static const Color kBrandGreen = Color(0xFF0D4722);
   static const Color kBrandGold = Color(0xFFD4AF37);
   static const String kBranchName = 'الفرع الرئيسي';
-  static const String kVersion = 'v8.3.10';
+  static const String kVersion = AppConstants.kVersion;
 
   // ------------ State ------------
   String? _cashierName;
