@@ -1,4 +1,4 @@
-﻿import 'package:uuid/uuid.dart';
+import 'package:uuid/uuid.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import 'dart:math';
@@ -30,7 +30,7 @@ class UserService {
       SELECT 
         u.*,
         r.id as role_id,
-        r.name as role_name
+        r.code as role_name
       FROM users_local u
       LEFT JOIN user_roles_local ur ON ur.user_id = u.id
       LEFT JOIN roles_local r ON r.id = ur.role_id
