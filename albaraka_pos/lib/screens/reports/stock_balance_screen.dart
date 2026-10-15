@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import '../../db/local_db.dart';
 import '../../widgets/product_units_dialog.dart';
+import '../../widgets/products/product_filter_bar.dart';
+import '../../widgets/products/anomaly_badge.dart';
+import '../settings/product_card_screen.dart';
 
 /// v8.3.7a — شاشة بيانات الأصناف (نمط البركة)
 /// 4 تبويبات: القائمة · الشجرة · الحركة · البطاقة
@@ -33,6 +36,9 @@ class _StockBalanceScreenState extends State<StockBalanceScreen>
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _searchDebounce;
   bool _movementsLoaded = false;
+
+  // --- v8.3.8.x: Smart anomaly filter ---
+  ProductFilter _anomalyFilter = ProductFilter.all;
 
   // Stats
   int _countAll = 0, _countZero = 0, _countLow = 0;
@@ -258,6 +264,7 @@ class _StockBalanceScreenState extends State<StockBalanceScreen>
                 children: [
                   _buildStats(theme),
                   _buildFilters(theme),
+                  _buildAnomalyBar(theme),
                   const Divider(height: 1),
                   Expanded(
                     child: TabBarView(
@@ -407,6 +414,61 @@ class _StockBalanceScreenState extends State<StockBalanceScreen>
     );
   }
 
+  // ---------- Anomaly helpers (v8.3.8.x) ----------
+  AnomalyType _anomalyBadgeFor(Map<String, dynamic> p) {
+    final cost = (p['standard_cost'] as num?)?.toDouble() ?? 0;
+    final price = (p['sale_price'] as num?)?.toDouble() ?? 0;
+    if (cost == 0 && price == 0) return AnomalyType.empty;
+    if (cost == 0) return AnomalyType.zeroCost;
+    if (price > 0 && price <= cost) return AnomalyType.lossMaking;
+    return AnomalyType.none;
+  }
+
+  List<Map<String, dynamic>> get _visibleProducts {
+    if (_anomalyFilter == ProductFilter.all) return _products;
+    return _products.where((p) {
+      final t = _anomalyBadgeFor(p);
+      switch (_anomalyFilter) {
+        case ProductFilter.needsReview: return t != AnomalyType.none;
+        case ProductFilter.zeroCost: return t == AnomalyType.zeroCost;
+        case ProductFilter.lossMaking: return t == AnomalyType.lossMaking;
+        case ProductFilter.empty: return t == AnomalyType.empty;
+        case ProductFilter.all: return true;
+      }
+    }).toList();
+  }
+
+  Widget _buildAnomalyBar(ThemeData theme) {
+    int zc = 0, lm = 0, em = 0;
+    for (final p in _products) {
+      final t = _anomalyBadgeFor(p);
+      if (t == AnomalyType.empty) { em++; }
+      else if (t == AnomalyType.zeroCost) { zc++; }
+      else if (t == AnomalyType.lossMaking) { lm++; }
+    }
+    return ProductFilterBar(
+      current: _anomalyFilter,
+      totalCount: _products.length,
+      needsReviewCount: zc + lm + em,
+      zeroCostCount: zc,
+      lossMakingCount: lm,
+      emptyCount: em,
+      onChanged: (f) => setState(() => _anomalyFilter = f),
+    );
+  }
+
+  void _openProductCard(Map<String, dynamic> p) {
+    final id = p['id'] as String?;
+    if (id == null || id.isEmpty) {
+      _selectProduct(p);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProductCardScreen(initialProductId: id),
+      ),
+    );
+  }
   // ---------- Tab 1: List ----------
   // v8.3.7a-FIX2 — ListView.builder بدل DataTable (أداء 10x أفضل)
   Widget _buildListTab(ThemeData theme) {
@@ -446,7 +508,7 @@ class _StockBalanceScreenState extends State<StockBalanceScreen>
           : ((p['unit_id'] as String?) ?? '-');
 
       return InkWell(
-        onTap: () => _selectProduct(p),
+        onTap: () => _openProductCard(p),
         child: Container(
           height: kRowHeight,
           width: totalWidth,
@@ -467,10 +529,22 @@ class _StockBalanceScreenState extends State<StockBalanceScreen>
                 width: kColWidths[1],
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 alignment: Alignment.centerRight,
-                child: Text((p['name'] as String?) ?? '-',
-                    style: const TextStyle(fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (_anomalyBadgeFor(p) != AnomalyType.none) ...[
+                      AnomalyBadge(type: _anomalyBadgeFor(p), compact: true),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Text((p['name'] as String?) ?? '-',
+                          style: const TextStyle(fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1),
+                    ),
+                  ],
+                ),
               ),
               Container(
                 width: kColWidths[2],
@@ -554,9 +628,9 @@ class _StockBalanceScreenState extends State<StockBalanceScreen>
             const Divider(height: 1),
             Expanded(
               child: ListView.builder(
-                itemCount: _products.length,
+                itemCount: _visibleProducts.length,
                 itemExtent: kRowHeight,
-                itemBuilder: (ctx, i) => row(_products[i]),
+                itemBuilder: (ctx, i) => row(_visibleProducts[i]),
               ),
             ),
           ],

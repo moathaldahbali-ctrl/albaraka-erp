@@ -523,6 +523,26 @@ class _SaleScreenState extends State<SaleScreen> {
   Future<void> _saveInvoice() async {
     if (_invoice.isEmpty || _saving) return;
 
+    // FIX: block save if any item isOverStock (Rule 5)
+    final overStockItems = _invoice.where((it) => it.isOverStock).toList();
+    if (overStockItems.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('تجاوز المخزون: ' + overStockItems.length.toString() + ' صنف'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+
+    // FIX: block save if any qty<=0 (Rule 5)
+    final zeroItems = _invoice.where((it) => it.quantity <= 0).toList();
+    if (zeroItems.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('كمية صفر: ' + zeroItems.length.toString() + ' صنف'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+
     final saveConfirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../db/local_db.dart';
 import '../../models/user_model.dart';
 import '../../services/user_service.dart';
@@ -140,7 +140,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
                       ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: _selectedRoleId,
+                      initialValue: _selectedRoleId,
                       decoration: const InputDecoration(
                         labelText: 'الدور',
                         border: OutlineInputBorder(),

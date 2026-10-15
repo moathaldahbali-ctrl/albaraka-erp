@@ -93,7 +93,7 @@ class _AboutScreenState extends State<AboutScreen> {
                             'assets/logo_color.png',
                             width: 100,
                             height: 100,
-                            errorBuilder: (_, __, ___) => Icon(
+                            errorBuilder: (_, _, _) => Icon(
                               Icons.store,
                               size: 80,
                               color: theme.colorScheme.primary,

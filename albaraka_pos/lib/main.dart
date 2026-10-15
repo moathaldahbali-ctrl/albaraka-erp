@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:io';
 import 'widgets/main_menu_bar.dart';
 import 'screens/reports/pos_activity_screen.dart';
 import 'screens/reports/cash_activity_screen.dart';
@@ -279,6 +281,9 @@ class _HomePageState extends State<HomePage> {
   bool _syncing = false;
   int _pendingSales = 0;
 
+  // v8.3.8.x-FIX8: مؤقت لفحص النت دورياً
+  Timer? _netTimer;
+
   @override
   void initState() {
     super.initState();
@@ -286,7 +291,29 @@ class _HomePageState extends State<HomePage> {
     _loadLocalThenSync();
     _refreshPendingCount();
     _loadPermissions();
+    _startNetTimer();
   }
+
+  /// v8.3.8.x-FIX8: يبدأ مؤقتاً لفحص النت كل 5 ثوان
+  void _startNetTimer() {
+    _netTimer?.cancel();
+    _netTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      final online = await _checkNetwork();
+      if (!mounted) return;
+      final newError = online ? null : "لا يوجد إنترنت — نعرض البيانات المحفوظة";
+      if (_syncError != newError) {
+        setState(() => _syncError = newError);
+        debugPrint("[NET_TIMER] online=" + online.toString());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _netTimer?.cancel();
+    super.dispose();
+  }
+
 
   Future<void> _loadPermissions() async {
     try {
@@ -294,6 +321,7 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       debugPrint('Auth load error: $e');
     }
+    if (mounted) setState(() {});
   }
 
   // ------------ Data ------------
@@ -308,8 +336,29 @@ class _HomePageState extends State<HomePage> {
     setState(() => _pendingSales = count);
   }
 
+  /// v8.3.8.x-FIX4: فحص شبكة صريح — لا يعتمد على Hasura
+  Future<bool> _checkNetwork() async {
+    try {
+      final sock = await Socket.connect("eewgyrglhvkxjwzevcwm.hasura.ap-southeast-1.nhost.run", 443,
+          timeout: const Duration(seconds: 3));
+      sock.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _loadLocalThenSync() async {
     final local = await LocalDatabase.instance.getAllCurrencies();
+    // v8.3.8.x-FIX4: فحص شبكة صريح أولاً
+    final online = await _checkNetwork();
+    debugPrint("[NET_CHECK] online=" + online.toString());
+    if (mounted) {
+      setState(() {
+        _syncError = online ? null : "لا يوجد إنترنت — نعرض البيانات المحفوظة";
+      });
+    }
+
     if (!mounted) return;
     setState(() {
       _currencies = local;
@@ -317,6 +366,37 @@ class _HomePageState extends State<HomePage> {
     });
 
     setState(() => _syncing = true);
+
+    // v8.3.8.x-FIX: مزامنة مستقلة — قبل Big Query حتى تعمل حتى لو فشل جلب البيانات
+    try {
+      await SyncManager.instance.syncPendingSessions(gqlClient);
+      await SyncManager.instance.syncPendingCustomers(gqlClient);
+      final syncEarly = await SyncManager.instance.syncPendingSales(gqlClient);
+      await _refreshPendingCount();
+      debugPrint("[SYNC_EARLY] synced=" + syncEarly.synced.toString() + " failed=" + syncEarly.failed.toString());
+      // v8.3.8.x-FIX6: _syncError يُعيَّن حصرياً من _checkNetwork
+      if (syncEarly.synced > 0 && mounted) {
+        ScaffoldMessenger.of(navigatorKey.currentContext ?? context).showSnackBar(
+          SnackBar(
+            content: Text("تمت مزامنة " + syncEarly.synced.toString() + " فاتورة"),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+      }
+    } catch (e2, st2) {
+      debugPrint("[SYNC_EARLY_ERROR] " + e2.toString());
+      debugPrint("[SYNC_EARLY_STACK] " + st2.toString());
+      final earlyErr = e2.toString();
+      final earlyIsNet = earlyErr.contains("SocketException") || earlyErr.contains("Failed host lookup") || earlyErr.contains("ClientException") || earlyErr.contains("TimeoutException");
+      debugPrint("[SYNC_EARLY_DIAG] isNetworkError=" + earlyIsNet.toString());
+      if (mounted) {
+        setState(() {
+          _syncError = earlyIsNet ? "لا يوجد إنترنت — نعرض البيانات المحفوظة" : null;
+          _syncing = false;
+        });
+      }
+    }
+
     try {
       final result = await gqlClient.query(
         QueryOptions(
@@ -325,9 +405,6 @@ class _HomePageState extends State<HomePage> {
               currencies { id code name exchange_rate }
               categories { slug name }
               customers { id code name account_number phone credit_limit notes is_active }
-              users { id username display_name email branch_id pin_hash pin_salt is_active }
-              roles { id name description }
-              user_roles { user_id role_id }
               products {
                 id
                 name
@@ -365,20 +442,9 @@ class _HomePageState extends State<HomePage> {
               .cast<Map<String, dynamic>>();
       await LocalDatabase.instance.upsertCustomers(customersList);
 
-      final usersList =
-          (result.data?['users'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>();
-      await LocalDatabase.instance.upsertUsers(usersList);
+      // v8.3.8.x-FIX: users sync مُلغى — Hasura users فارغ. يُدار عبر UserSyncService.
 
-      final rolesList =
-          (result.data?['roles'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>();
-      await LocalDatabase.instance.upsertRoles(rolesList);
 
-      final userRolesList =
-          (result.data?['user_roles'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>();
-      await LocalDatabase.instance.upsertUserRoles(userRolesList);
 
       final productsRaw = (result.data?['products'] as List<dynamic>? ?? []);
       final productsList = <Map<String, dynamic>>[];
@@ -426,37 +492,14 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _currencies = refreshed;
         _syncError = null;
-      });
-
-      // v7.4/8: sessions before sales (FK)
-      await SyncManager.instance.syncPendingSessions(gqlClient);
-      await SyncManager.instance.syncPendingCustomers(gqlClient);
-      final syncResult =
-          await SyncManager.instance.syncPendingSales(gqlClient);
-      await _refreshPendingCount();
-
-      if (!mounted) return;
-      setState(() => _syncing = false);
-
-      if (syncResult.synced > 0) {
-        ScaffoldMessenger.of(navigatorKey.currentContext ?? context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'تمت مزامنة ${syncResult.synced} فاتورة' +
-                  (syncResult.failed > 0
-                      ? ' — فشل ${syncResult.failed}'
-                      : ''),
-            ),
-            backgroundColor: Colors.green.shade700,
-          ),
-        );
-      }
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _syncError = 'لا يوجد إنترنت — نعرض البيانات المحفوظة';
         _syncing = false;
       });
+
+    } catch (e, st) {
+      // v8.3.8.x-FIX3: Big Query غير حرج — لا يؤثر على حالة الاتصال
+      debugPrint("[BIG_QUERY_ERROR] " + e.toString());
+      debugPrint("[BIG_QUERY_STACK] " + st.toString());
+      if (mounted) setState(() => _syncing = false);
     }
   }
 
@@ -564,11 +607,13 @@ class _HomePageState extends State<HomePage> {
             onOpenCustomerReport: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CustomerActivityScreen())),
             onOpenProductCard: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProductCardScreen())),
             onOpenStockBalance: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StockBalanceScreen())),
+            onOpenProductsManage: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StockBalanceScreen())),
             onOpenAbout: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())),
             onOpenExpired: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ExpiredProductsScreen())),
             onOpenAlerts: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AlertsScreen())),
             onOpenCategoriesTree: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CategoriesTreeScreen())),
             onOpenProductImport: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProductImportScreen())),
+            // [REMOVED v8.3.8.x] onOpenProductList — duplicate of onOpenProductsManage
             onOpenCustomersManage: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CustomersManageScreen())),
             onOpenThemes: () => ThemePickerDialog.show(context),
             onOpenUsersManage: () {

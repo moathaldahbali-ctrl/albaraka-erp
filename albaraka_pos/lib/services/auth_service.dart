@@ -1,6 +1,5 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:graphql/client.dart';
-import 'package:graphql/client.dart' show gql;
 import '../db/local_db.dart';
 
 /// v9.2 â€” ط®ط¯ظ…ط© ط§ظ„طµظ„ط§ط­ظٹط§طھ
@@ -42,7 +41,7 @@ class AuthService {
       final ok = await _loadFromHasura(client, userId);
       if (ok) {
         await _saveCache(userId);
-        debugPrint('[Auth] ${_permissions.length} perms loaded for $userId (${_roleName})');
+        debugPrint('[Auth] ${_permissions.length} perms loaded for $userId ($_roleName)');
         return;
       }
     } catch (e) {

@@ -159,10 +159,10 @@ class _PosActivityScreenState extends State<PosActivityScreen> {
       child: Row(
         children: [
           _statCard(theme, 'فواتير نقد',
-              '${_countCash}', _fmtNum(_sumCash), Colors.green),
+              '$_countCash', _fmtNum(_sumCash), Colors.green),
           const SizedBox(width: 8),
           _statCard(theme, 'فواتير آجل',
-              '${_countCredit}', _fmtNum(_sumCredit), Colors.orange),
+              '$_countCredit', _fmtNum(_sumCredit), Colors.orange),
           const SizedBox(width: 8),
           _statCard(theme, 'الإجمالي',
               '${_rows.length}', _fmtNum(_sumCash + _sumCredit), theme.colorScheme.primary),

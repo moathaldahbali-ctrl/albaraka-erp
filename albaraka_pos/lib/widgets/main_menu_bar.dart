@@ -21,6 +21,7 @@ class MainMenuBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onOpenAlerts;
   final VoidCallback? onOpenCategoriesTree;
   final VoidCallback? onOpenProductImport;
+  final VoidCallback? onOpenProductList;
 
   const MainMenuBar({
     super.key,
@@ -41,6 +42,7 @@ class MainMenuBar extends StatelessWidget implements PreferredSizeWidget {
     this.onOpenAlerts,
     this.onOpenCategoriesTree,
     this.onOpenProductImport,
+    this.onOpenProductList,
     this.onOpenUsersManage,
   });
 
@@ -101,7 +103,7 @@ class MainMenuBar extends StatelessWidget implements PreferredSizeWidget {
             'assets/logo_color.png',
             width: 26,
             height: 26,
-            errorBuilder: (_, __, ___) => const Icon(Icons.store, size: 22),
+            errorBuilder: (_, _, _) => const Icon(Icons.store, size: 22),
           ),
           const SizedBox(width: 6),
           Text(
@@ -242,20 +244,18 @@ class MainMenuBar extends StatelessWidget implements PreferredSizeWidget {
                   label: 'بيانات الأصناف',
                   icon: Icons.category,
                   onPressed: onOpenProductsManage,
-                  permission: 'products.edit',
                 ),
                 _perm(
                   label: 'شجرة التصنيفات',
                   icon: Icons.account_tree,
                   onPressed: onOpenCategoriesTree,
-                  permission: 'products.view',
                 ),
                 _perm(
-                  label: 'استيراد منتجات',
+                  label: 'استيراد الأصناف',
                   icon: Icons.upload_file,
                   onPressed: onOpenProductImport,
-                  permission: 'products.edit',
                 ),
+          // [REMOVED v8.3.8.x] 'قائمة المنتجات' — duplicate of 'بيانات الأصناف'
                 _perm(
                   label: 'بيانات العملاء',
                   icon: Icons.people_alt,

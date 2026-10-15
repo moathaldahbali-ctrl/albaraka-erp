@@ -13,7 +13,7 @@ class ExpiredProductsScreen extends StatefulWidget {
 class _ExpiredProductsScreenState extends State<ExpiredProductsScreen> {
   List<Map<String, dynamic>> _rows = [];
   List<Map<String, dynamic>> _categories = [];
-  Map<String, String> _catNames = {};
+  final Map<String, String> _catNames = {};
   bool _loading = true;
   String _categoryFilter = '';
   final TextEditingController _searchCtrl = TextEditingController();

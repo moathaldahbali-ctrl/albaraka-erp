@@ -1,7 +1,8 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:graphql/client.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../db/local_db.dart';
+import 'product_admin_sync_service.dart';
 
 class SyncResult {
   final int synced;
@@ -87,6 +88,16 @@ class SyncManager {
     }
 
     return SyncResult(synced: synced, failed: failed, total: pending.length);
+  }
+
+  // v8.3.8.7 — مزامنة تعديلات المنتجات (cost + price)
+  Future<SyncResult> syncPendingProducts(GraphQLClient client) async {
+    final r = await ProductAdminSyncService.syncPendingProducts(client);
+    return SyncResult(
+      synced: r.synced,
+      failed: r.failed,
+      total: r.synced + r.failed,
+    );
   }
   Future<Map<String, String>> _lookupUnitKeys(
     GraphQLClient client,

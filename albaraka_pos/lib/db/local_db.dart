@@ -147,6 +147,19 @@ class LocalDatabase {
     }
     return result;
   }
+
+  /// G1 — خريطة slug → name (للعرض بالعربية)
+  Future<Map<String, String>> getCategoryNameMap() async {
+    final db = await database;
+    final rows = await db.query('categories_local', columns: ['slug', 'name']);
+    final map = <String, String>{};
+    for (final r in rows) {
+      final slug = r['slug'] as String?;
+      final name = r['name'] as String?;
+      if (slug != null && name != null) map[slug] = name;
+    }
+    return map;
+  }
   Future<void> _addColumnIfMissing(Database db, String table, String column, String definition) async {
     final info = await db.rawQuery('PRAGMA table_info($table)');
     final exists = info.any((r) => r['name'] == column);

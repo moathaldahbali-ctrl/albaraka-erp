@@ -1,0 +1,305 @@
+import 'package:flutter/material.dart';
+import '../services/auth_service.dart';
+
+/// v9.3 — شريط القوائم مع فلترة حسب الصلاحيات
+class MainMenuBar extends StatelessWidget implements PreferredSizeWidget {
+  final VoidCallback onNewSale;
+  final VoidCallback onSync;
+  final VoidCallback onCloseSession;
+  final VoidCallback onLogout;
+  final VoidCallback onOpenThemes;
+  final VoidCallback? onOpenAbout;
+  final VoidCallback? onOpenUsersManage;
+  final VoidCallback? onOpenProductsManage;
+  final VoidCallback? onOpenCustomersManage;
+  final VoidCallback? onOpenPosReport;
+  final VoidCallback? onOpenCashReport;
+  final VoidCallback? onOpenCustomerReport;
+  final VoidCallback? onOpenProductCard;
+  final VoidCallback? onOpenStockBalance;
+  final VoidCallback? onOpenExpired;
+  final VoidCallback? onOpenAlerts;
+  final VoidCallback? onOpenCategoriesTree;
+  final VoidCallback? onOpenProductImport;
+  final VoidCallback? onOpenProductList;
+
+  const MainMenuBar({
+    super.key,
+    required this.onNewSale,
+    required this.onSync,
+    required this.onCloseSession,
+    required this.onLogout,
+    required this.onOpenThemes,
+    this.onOpenAbout,
+    this.onOpenProductsManage,
+    this.onOpenCustomersManage,
+    this.onOpenPosReport,
+    this.onOpenCashReport,
+    this.onOpenCustomerReport,
+    this.onOpenProductCard,
+    this.onOpenStockBalance,
+    this.onOpenExpired,
+    this.onOpenAlerts,
+    this.onOpenCategoriesTree,
+    this.onOpenProductImport,
+    this.onOpenProductList,
+    this.onOpenUsersManage,
+  });
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  bool _can(String slug) => AuthService.instance.has(slug);
+  bool _canAny(List<String> slugs) => AuthService.instance.hasAny(slugs);
+
+  // ------ item مع فلترة صلاحيات ------
+  // permission: الصلاحية المطلوبة (null = متاح للجميع)
+  Widget? _perm({
+    required String label,
+    required IconData icon,
+    VoidCallback? onPressed,
+    String? permission,
+  }) {
+    // إذا الصلاحية محددة والمستخدم لا يملكها → أخفِ العنصر
+    if (permission != null && !_can(permission)) return null;
+
+    final enabled = onPressed != null;
+    return MenuItemButton(
+      onPressed: onPressed,
+      leadingIcon: Icon(icon, size: 18, color: enabled ? null : Colors.grey),
+      trailingIcon: enabled
+          ? null
+          : const Icon(Icons.lock, size: 13, color: Colors.grey),
+      child: Text(
+        label,
+        style: TextStyle(color: enabled ? null : Colors.grey),
+      ),
+    );
+  }
+
+  // ------ قائمة منسدلة (تُخفى إن كانت فارغة) ------
+  Widget? _menu(String label, List<Widget?> children) {
+    final visible = children.whereType<Widget>().toList();
+    // v9.3 — strip orphan dividers (leading + trailing)
+    while (visible.isNotEmpty && visible.first is Divider) { visible.removeAt(0); }
+    while (visible.isNotEmpty && visible.last is Divider) { visible.removeAt(visible.length - 1); }
+    if (visible.isEmpty) return null;
+    return SubmenuButton(
+      menuChildren: visible,
+      child: Text(label),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      height: 52,
+      color: theme.colorScheme.surface,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          Image.asset(
+            'assets/logo_color.png',
+            width: 26,
+            height: 26,
+            errorBuilder: (_, _, _) => const Icon(Icons.store, size: 22),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'البركة',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          MenuBar(
+            children: [
+              // ============= ملف =============
+              _menu('ملف', [
+                _perm(
+                  label: 'فاتورة جديدة',
+                  icon: Icons.receipt_long,
+                  onPressed: onNewSale,
+                  permission: 'sales.create',
+                ),
+                const Divider(height: 1),
+                _perm(
+                  label: 'تحديث البيانات',
+                  icon: Icons.refresh,
+                  onPressed: onSync,
+                  // sync متاح للجميع
+                ),
+                _perm(
+                  label: 'تغيير كلمة المرور',
+                  icon: Icons.password,
+                  onPressed: null,
+                  permission: 'settings.users',
+                ),
+                _perm(
+                  label: 'فحص النظام',
+                  icon: Icons.health_and_safety,
+                  onPressed: null,
+                  permission: 'settings.users',
+                ),
+                const Divider(height: 1),
+                _perm(
+                  label: 'خروج',
+                  icon: Icons.logout,
+                  onPressed: onLogout,
+                ),
+              ]),
+              // ============= العمليات =============
+              _menu('العمليات', [
+                _perm(
+                  label: 'فاتورة مبيعات',
+                  icon: Icons.point_of_sale,
+                  onPressed: onNewSale,
+                  permission: 'sales.create',
+                ),
+                _perm(
+                  label: 'مرتجع مبيعات',
+                  icon: Icons.assignment_return,
+                  onPressed: null,
+                  permission: 'sales.return',
+                ),
+                _perm(
+                  label: 'عرض سعر',
+                  icon: Icons.request_quote,
+                  onPressed: null,
+                  permission: 'sales.create',
+                ),
+                const Divider(height: 1),
+                _perm(
+                  label: 'سند قبض',
+                  icon: Icons.receipt,
+                  onPressed: null,
+                  permission: 'accounting.entry',
+                ),
+                _perm(
+                  label: 'سند صرف',
+                  icon: Icons.payments,
+                  onPressed: null,
+                  permission: 'accounting.entry',
+                ),
+              ]),
+              // ============= التقارير =============
+              _menu('التقارير', [
+                _perm(
+                  label: 'حركة نقاط البيع',
+                  icon: Icons.point_of_sale,
+                  onPressed: onOpenPosReport,
+                  permission: 'reports.pos',
+                ),
+                _perm(
+                  label: 'حركة الصناديق',
+                  icon: Icons.account_balance_wallet,
+                  onPressed: onOpenCashReport,
+                  permission: 'reports.cash',
+                ),
+                _perm(
+                  label: 'حركة العملاء',
+                  icon: Icons.people,
+                  onPressed: onOpenCustomerReport,
+                  permission: 'reports.customers',
+                ),
+                const Divider(height: 1),
+                _perm(
+                  label: 'بطاقة الصنف',
+                  icon: Icons.badge,
+                  onPressed: onOpenProductCard,
+                  permission: 'reports.stock',
+                ),
+                _perm(
+                  label: 'رصيد الأصناف',
+                  icon: Icons.assignment,
+                  onPressed: onOpenStockBalance,
+                  permission: 'reports.stock',
+                ),
+                _perm(
+                  label: 'الأصناف المنتهية',
+                  icon: Icons.warning_amber,
+                  onPressed: onOpenExpired,
+                  permission: 'reports.expired',
+                ),
+                const Divider(height: 1),
+                _perm(
+                  label: 'التنبيهات',
+                  icon: Icons.notifications,
+                  onPressed: onOpenAlerts,
+                  permission: 'reports.alerts',
+                ),
+              ]),
+              // ============= الإعدادات =============
+              _menu('الإعدادات', [
+                _perm(
+                  label: 'الثيمات والألوان',
+                  icon: Icons.palette,
+                  onPressed: onOpenThemes,
+                  permission: 'settings.themes',
+                ),
+                _perm(
+                  label: 'بيانات الأصناف',
+                  icon: Icons.category,
+                  onPressed: onOpenProductsManage,
+                  permission: 'items.basic.edit',
+                ),
+                _perm(
+                  label: 'شجرة التصنيفات',
+                  icon: Icons.account_tree,
+                  onPressed: onOpenCategoriesTree,
+                  permission: 'items.tree.view',
+                ),
+                _perm(
+                  label: 'استيراد منتجات',
+                  icon: Icons.upload_file,
+                  onPressed: onOpenProductImport,
+                ),
+          // [REMOVED v8.3.8.x] 'قائمة المنتجات' — duplicate of 'بيانات الأصناف'
+                _perm(
+                  label: 'بيانات العملاء',
+                  icon: Icons.people_alt,
+                  onPressed: onOpenCustomersManage,
+                  permission: 'customers.view',
+                ),
+                const Divider(height: 1),
+                _perm(
+                  label: 'إدارة المستخدمين',
+                  icon: Icons.manage_accounts,
+                  onPressed: onOpenUsersManage,
+                  permission: 'settings.users',
+                ),
+                const Divider(),
+                _perm(
+                  label: 'عن النظام',
+                  icon: Icons.info_outline,
+                  onPressed: onOpenAbout,
+                  permission: 'settings.about',
+                ),
+              ]),
+            ].whereType<Widget>().toList(),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.sync),
+            tooltip: 'مزامنة الآن',
+            onPressed: onSync,
+          ),
+          if (_canAny(['session.close_own', 'session.close_any']))
+            IconButton(
+              icon: const Icon(Icons.lock_outline),
+              tooltip: 'إغلاق الوردية',
+              onPressed: onCloseSession,
+            ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'تسجيل الخروج',
+            onPressed: onLogout,
+          ),
+        ],
+      ),
+    );
+  }
+}
