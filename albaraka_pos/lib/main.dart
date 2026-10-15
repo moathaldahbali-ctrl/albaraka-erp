@@ -271,7 +271,7 @@ class _HomePageState extends State<HomePage> {
   static const Color kBrandGreen = Color(0xFF0D4722);
   static const Color kBrandGold = Color(0xFFD4AF37);
   static const String kBranchName = 'الفرع الرئيسي';
-  static const String kVersion = 'v9.4.6';
+  static const String kVersion = 'v8.3.10';
 
   // ------------ State ------------
   String? _cashierName;
