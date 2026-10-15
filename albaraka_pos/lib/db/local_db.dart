@@ -629,7 +629,10 @@ class LocalDatabase {
     ''', args);
   }
   Future<List<Map<String, dynamic>>> searchProducts(
-    String query, {String? categorySlug}) async {
+    String query, {
+    String? categorySlug,
+    bool hideZeroStock = false,   // v8.3.9 - Cashier filter
+  }) async {
     final db = await database;
     final trimmed = query.trim();
     final whereParts = <String>[];
@@ -638,6 +641,11 @@ class LocalDatabase {
     if (categorySlug != null && categorySlug.isNotEmpty) {
       whereParts.add('category_slug = ?');
       args.add(categorySlug);
+    }
+    // v8.3.9 - hide zero/sold-out items from cashier.
+    // NULL = no stock_balance row -> treated as unlimited -> keep visible.
+    if (hideZeroStock) {
+      whereParts.add('(stock_qty IS NULL OR stock_qty > 0)');
     }
     if (trimmed.isNotEmpty) {
       final words = trimmed
@@ -659,6 +667,11 @@ class LocalDatabase {
       final exactArgs = <dynamic>[];
       if (categorySlug != null && categorySlug.isNotEmpty) {
         exactWhere.add('category_slug = ?'); exactArgs.add(categorySlug);
+      }
+      // v8.3.9 - same filter applies to exact SKU lookup
+      // (prevents showing sold-out items when cashier scans a barcode)
+      if (hideZeroStock) {
+        exactWhere.add('(stock_qty IS NULL OR stock_qty > 0)');
       }
       exactWhere.add('sku = ?'); exactArgs.add(trimmed);
 

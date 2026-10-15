@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../db/local_db.dart';
 import '../widgets/payment_dialog.dart';
 import '../services/receipt_service.dart';
+import '../services/auth_service.dart';   // v8.3.9
 
 class InvoiceItem {
   final String productId;
@@ -263,10 +264,15 @@ class _SaleScreenState extends State<SaleScreen> {
     _scheduleDraftSave();
   }
   Future<void> _openProductPicker() async {
+    // v8.3.9 - same cashier filter applies inside the F4 picker.
+    final hideZero = AuthService.instance.roleName == 'Cashier';
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => ProductPickerDialog(
-        search: (q) => LocalDatabase.instance.searchProducts(q),
+        search: (q) => LocalDatabase.instance.searchProducts(
+          q,
+          hideZeroStock: hideZero,
+        ),
       ),
     );
     if (result == null) return;
@@ -281,9 +287,12 @@ class _SaleScreenState extends State<SaleScreen> {
   }
 
   Future<void> _loadProducts(String query) async {
+    // v8.3.9 - Cashier does not see sold-out (stock_qty <= 0) items.
+    final hideZero = AuthService.instance.roleName == 'Cashier';
     final results = await LocalDatabase.instance.searchProducts(
       query,
       categorySlug: _selectedCategory,
+      hideZeroStock: hideZero,
     );
     if (!mounted) return;
     setState(() {
