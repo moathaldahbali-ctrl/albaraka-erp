@@ -41,9 +41,17 @@ class UserService {
   }
 
   /// جلب كل الأدوار
+  /// v8.3.10 — schema fix: roles_local uses (code, name_ar) not (name)
   Future<List<RoleModel>> getAllRoles() async {
     final db = await _db.database;
-    final rows = await db.query('roles_local', orderBy: 'name');
+    final rows = await db.rawQuery('''
+      SELECT
+        id,
+        code     AS name,
+        name_ar  AS description
+      FROM roles_local
+      ORDER BY code
+    ''');
     return rows.map((r) => RoleModel.fromMap(r)).toList();
   }
 
