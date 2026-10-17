@@ -123,6 +123,25 @@ class LocalDatabase {
           await _addColumnIfMissing(db, 'categories_local', 'parent_slug', 'TEXT');
           debugPrint('[DB] v19 -> v20: categories_local.parent_id added');
         }
+        if (oldVersion < 21) {
+          // v8.3.10 — fix legacy UUID role_ids (v18 dropped roles_local
+          // and recreated with name-based ids, orphaning user_roles_local)
+          await db.execute('''
+            UPDATE user_roles_local
+            SET role_id = (
+              CASE role_id
+                WHEN '44444444-4444-4444-4444-444444444441' THEN 'General_Manager'
+                WHEN '44444444-4444-4444-4444-444444444442' THEN 'Store_Manager'
+                WHEN '44444444-4444-4444-4444-444444444443' THEN 'Accountant'
+                WHEN '44444444-4444-4444-4444-444444444444' THEN 'Inventory_Clerk'
+                WHEN '44444444-4444-4444-4444-444444444445' THEN 'Cashier'
+                ELSE role_id
+              END
+            )
+            WHERE role_id LIKE '44444444-4444-4444-4444-%'
+          ''');
+          debugPrint('[DB] v20 -> v21: user_roles_local UUIDs mapped to role codes');
+        }
       },
     );
   }

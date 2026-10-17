@@ -7,7 +7,7 @@ void main() {
   var c = f.readAsStringSync();
 
   // 1) version: 19 → 20
-  c = c.replaceFirst('      version: 19,', '      version: 20,');
+  c = c.replaceFirst('      version: 19,', '      version: 21,');
 
   // 2) Add in onCreate: parent_id migration
   const oldCreate = "        await _createCategoriesTable(db);\n        await _createProductsTable(db);";
