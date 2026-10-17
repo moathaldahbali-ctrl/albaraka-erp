@@ -319,6 +319,10 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadPermissions() async {
     try {
       await AuthService.instance.loadForCurrentUser(gqlClient);
+      final a = AuthService.instance;
+      debugPrint('[PERMS] role=${a.roleName} count=${a.permissions.length} '
+          'hasUsers=${a.has("settings.users")} '
+          'hasSec=${a.has("sec.user_permissions")}');
     } catch (e) {
       debugPrint('Auth load error: $e');
     }
@@ -618,6 +622,16 @@ class _HomePageState extends State<HomePage> {
             onOpenCustomersManage: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CustomersManageScreen())),
             onOpenThemes: () => ThemePickerDialog.show(context),
             onOpenUsersManage: () {
+              final allowed =
+                  AuthService.instance.has('sec.user_permissions') ||
+                  AuthService.instance.has('settings.users');
+              if (!allowed) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text(
+                    '\u063A\u064A\u0631 \u0645\u0635\u0631\u062D')),
+                );
+                return;
+              }
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const UsersScreen()),

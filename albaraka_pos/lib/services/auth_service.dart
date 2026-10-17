@@ -41,6 +41,7 @@ class AuthService {
       final ok = await _loadFromHasura(client, userId);
       if (ok) {
         await _saveCache(userId);
+        _applyRoleFilters();
         debugPrint('[Auth] ${_permissions.length} perms loaded for $userId ($_roleName)');
         return;
       }
@@ -50,6 +51,7 @@ class AuthService {
 
     // 2) Fallback: ط§ظ‚ط±ط£ ظ…ظ† cache
     final ok = await _loadCache(userId);
+    _applyRoleFilters();
     if (!ok) {
       debugPrint('[Auth] No cache for $userId â€” طµظ„ط§ط­ظٹط§طھ ظپط§ط±ط؛ط©');
     }
@@ -128,6 +130,31 @@ class AuthService {
     } catch (_) {
       return false;
     }
+  }
+
+  /// v8.3.11 - filter admin-only permissions for cashier
+  void _applyRoleFilters() {
+    final role = (_roleName ?? '').toLowerCase().trim();
+    if (role.isEmpty) {
+      debugPrint('[Auth] v8.3.11 filter: role unknown - skipped');
+      return;
+    }
+    final isCashier = role.contains('cashier') ||
+                      role.contains('\u0643\u0627\u0634\u064A\u0631') ||
+                      role.contains('kasir');
+    if (!isCashier) {
+      return;
+    }
+    const adminOnly = <String>{
+      'settings.users',
+      'settings.users.create',
+      'settings.users.edit',
+      'settings.users.delete',
+      'sec.user_permissions',
+    };
+    final before = _permissions.length;
+    _permissions.removeAll(adminOnly);
+    debugPrint('[Auth] v8.3.11 filter: $before -> ${_permissions.length}');
   }
 
   void clear() {

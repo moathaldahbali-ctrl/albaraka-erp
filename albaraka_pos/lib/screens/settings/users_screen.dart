@@ -3,6 +3,7 @@ import 'package:graphql_flutter/graphql_flutter.dart';
 import '../../db/local_db.dart';
 import '../../models/user_model.dart';
 import '../../services/user_service.dart';
+import '../../services/auth_service.dart';
 import '../../sync/sync_manager_extension.dart';
 import 'user_form_screen.dart';
 
@@ -50,6 +51,29 @@ class _UsersScreenState extends State<UsersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthService.instance.has('sec.user_permissions') &&
+        !AuthService.instance.has('settings.users')) {
+      return Directionality(
+        textDirection: TextDirection.rtl,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('\u063A\u064A\u0631 \u0645\u0635\u0631\u062D'),
+            backgroundColor: const Color(0xFF1E3A5F),
+            foregroundColor: Colors.white,
+          ),
+          body: const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                '\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
